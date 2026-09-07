@@ -1,0 +1,9 @@
+# No third-party packages are required.
+# route_service.py uses only Python standard library modules:
+#   - urllib (HTTP requests)
+#   - json
+#   - logging
+#   - os, sys, time
+
+# If you want optional pretty-printing or CLI conveniences, uncomment below:
+# rich>=13.0          # colourful terminal output (optional)

@@ -1,0 +1,158 @@
+[
+  {
+    "route_id": "R1",
+    "origin": "Guwahati",
+    "destination": "Silchar",
+    "route_name": "Guwahati - Haflong - Silchar",
+    "distance_km": 180,
+    "estimated_time_min": 240,
+    "coordinates": [
+      { "lat": 26.1445, "lon": 91.7362 },
+      { "lat": 25.1643, "lon": 93.0167 },
+      { "lat": 24.8333, "lon": 92.7789 }
+    ],
+    "landslide_risk": 82,
+    "risk_level": "HIGH",
+    "accessibility_score": 42,
+    "recommended": false
+  },
+  {
+    "route_id": "R2",
+    "origin": "Guwahati",
+    "destination": "Silchar",
+    "route_name": "Guwahati - Shillong - Jowai - Silchar",
+    "distance_km": 205,
+    "estimated_time_min": 285,
+    "coordinates": [
+      { "lat": 26.1445, "lon": 91.7362 },
+      { "lat": 25.5788, "lon": 91.8933 },
+      { "lat": 25.4500, "lon": 92.2000 },
+      { "lat": 24.8333, "lon": 92.7789 }
+    ],
+    "landslide_risk": 25,
+    "risk_level": "LOW",
+    "accessibility_score": 87,
+    "recommended": false
+  },
+  {
+    "route_id": "R3",
+    "origin": "Guwahati",
+    "destination": "Silchar",
+    "route_name": "Guwahati - Lumding - Silchar",
+    "distance_km": 220,
+    "estimated_time_min": 310,
+    "coordinates": [
+      { "lat": 26.1445, "lon": 91.7362 },
+      { "lat": 25.7500, "lon": 93.1667 },
+      { "lat": 24.8333, "lon": 92.7789 }
+    ],
+    "landslide_risk": 54,
+    "risk_level": "MEDIUM",
+    "accessibility_score": 71,
+    "recommended": false
+  },
+  {
+    "route_id": "R4",
+    "origin": "Guwahati",
+    "destination": "Silchar",
+    "route_name": "Guwahati - Diphu - Haflong - Silchar",
+    "distance_km": 265,
+    "estimated_time_min": 360,
+    "coordinates": [
+      { "lat": 26.1445, "lon": 91.7362 },
+      { "lat": 25.8483, "lon": 93.4333 },
+      { "lat": 25.1643, "lon": 93.0167 },
+      { "lat": 24.8333, "lon": 92.7789 }
+    ],
+    "landslide_risk": 68,
+    "risk_level": "HIGH",
+    "accessibility_score": 38,
+    "recommended": false
+  },
+  {
+    "route_id": "R5",
+    "origin": "Guwahati",
+    "destination": "Silchar",
+    "route_name": "Guwahati - Badarpur - Silchar (NH-27)",
+    "distance_km": 330,
+    "estimated_time_min": 420,
+    "coordinates": [
+      { "lat": 26.1445, "lon": 91.7362 },
+      { "lat": 24.8700, "lon": 92.5800 },
+      { "lat": 24.8333, "lon": 92.7789 }
+    ],
+    "landslide_risk": 18,
+    "risk_level": "LOW",
+    "accessibility_score": 79,
+    "recommended": false
+  },
+  {
+    "route_id": "R6",
+    "origin": "Guwahati",
+    "destination": "Imphal",
+    "route_name": "Guwahati - Nagaon - Kohima - Imphal (NH-2)",
+    "distance_km": 495,
+    "estimated_time_min": 630,
+    "coordinates": [
+      { "lat": 26.1445, "lon": 91.7362 },
+      { "lat": 26.3468, "lon": 92.6844 },
+      { "lat": 25.6700, "lon": 94.1100 },
+      { "lat": 24.8170, "lon": 93.9368 }
+    ],
+    "landslide_risk": 71,
+    "risk_level": "HIGH",
+    "accessibility_score": 45,
+    "recommended": false
+  },
+  {
+    "route_id": "R7",
+    "origin": "Guwahati",
+    "destination": "Imphal",
+    "route_name": "Guwahati - Dimapur - Imphal (NH-29)",
+    "distance_km": 460,
+    "estimated_time_min": 590,
+    "coordinates": [
+      { "lat": 26.1445, "lon": 91.7362 },
+      { "lat": 25.9003, "lon": 93.7275 },
+      { "lat": 24.8170, "lon": 93.9368 }
+    ],
+    "landslide_risk": 48,
+    "risk_level": "MEDIUM",
+    "accessibility_score": 66,
+    "recommended": false
+  },
+  {
+    "route_id": "R8",
+    "origin": "Guwahati",
+    "destination": "Aizawl",
+    "route_name": "Guwahati - Silchar - Aizawl (NH-306)",
+    "distance_km": 510,
+    "estimated_time_min": 660,
+    "coordinates": [
+      { "lat": 26.1445, "lon": 91.7362 },
+      { "lat": 24.8333, "lon": 92.7789 },
+      { "lat": 23.7271, "lon": 92.7176 }
+    ],
+    "landslide_risk": 62,
+    "risk_level": "HIGH",
+    "accessibility_score": 51,
+    "recommended": false
+  },
+  {
+    "route_id": "R9",
+    "origin": "Guwahati",
+    "destination": "Aizawl",
+    "route_name": "Guwahati - Shillong - Aizawl (via Mizoram border)",
+    "distance_km": 480,
+    "estimated_time_min": 630,
+    "coordinates": [
+      { "lat": 26.1445, "lon": 91.7362 },
+      { "lat": 25.5788, "lon": 91.8933 },
+      { "lat": 23.7271, "lon": 92.7176 }
+    ],
+    "landslide_risk": 35,
+    "risk_level": "MEDIUM",
+    "accessibility_score": 74,
+    "recommended": false
+  }
+]

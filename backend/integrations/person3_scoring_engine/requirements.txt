@@ -1,0 +1,8 @@
+# Add any extra Python packages Person 3's scoring engine needs here.
+# Example:
+#   numpy>=1.24
+#   scipy>=1.10
+
+# Leave empty if no additional dependencies are required beyond what is
+# already in the main backend requirements.txt (fastapi, scikit-learn,
+# pandas, joblib, scipy).
