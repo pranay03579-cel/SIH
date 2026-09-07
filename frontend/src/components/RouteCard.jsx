@@ -1,11 +1,23 @@
 import React from 'react';
-import { IconSparkles, IconClock, IconAlertTriangle, IconShield } from './Icons';
+import { IconAlertTriangle } from './Icons';
+
+// Route color palette — shared with RouteMap for card↔map color correspondence
+// Each index maps to both the card left-border accent and the map polyline color
+export const ROUTE_PALETTE = [
+  { main: '#2563eb', bg: 'rgba(37, 99, 235, 0.08)', border: '#1d4ed8' },   // Route 1: Institutional blue
+  { main: '#d97706', bg: 'rgba(217, 119, 6, 0.08)', border: '#b45309' },   // Route 2: Amber/orange — clearly visible on dark map
+  { main: '#7c3aed', bg: 'rgba(124, 58, 237, 0.08)', border: '#6d28d9' },  // Route 3: Professional purple
+  { main: '#0d9488', bg: 'rgba(13, 148, 136, 0.08)', border: '#0f766e' },  // Route 4: Deep teal
+  { main: '#be185d', bg: 'rgba(190, 24, 93, 0.08)', border: '#9d174d' },   // Route 5: Deep rose
+];
 
 export default function RouteCard({
   route,
-  isSelected   = false,
-  isRecommended = false,   // controlled by parent (recommendedId state), NOT route.recommended
-  onSelect
+  index = 0,
+  isSelected = false,
+  isRecommended = false,
+  comparisonTags = [],
+  onSelect,
 }) {
   const {
     route_id,
@@ -15,21 +27,13 @@ export default function RouteCard({
     landslide_risk,
     risk_level,
     accessibility_score,
-    // Person 3 detailed breakdown (present when backend returns them)
-    distance_score,
-    time_score,
-    risk_score,
-    distance_weight,
-    time_weight,
-    risk_weight,
   } = route;
 
-  const hasBreakdown = distance_score != null && time_score != null && risk_score != null;
+  const colorTheme = ROUTE_PALETTE[index % ROUTE_PALETTE.length];
 
-  // Format minutes → "Xh Ym"
   const formatTime = (mins) => {
     if (!mins && mins !== 0) return '—';
-    const hours     = Math.floor(mins / 60);
+    const hours = Math.floor(mins / 60);
     const remainder = Math.round(mins % 60);
     if (hours === 0) return `${remainder}m`;
     return remainder > 0 ? `${hours}h ${remainder}m` : `${hours}h`;
@@ -46,112 +50,113 @@ export default function RouteCard({
   };
 
   const getScoreColor = (score) => {
-    if (score >= 80) return '#34d399';
-    if (score >= 60) return '#38bdf8';
-    if (score >= 40) return '#fbbf24';
-    return '#f87171';
+    if (score >= 80) return 'var(--risk-low)';
+    if (score >= 60) return 'var(--risk-medium)';
+    if (score >= 40) return 'var(--risk-high)';
+    return 'var(--risk-critical)';
   };
-
-  const pct = (w) => w != null ? `${Math.round(w * 100)}%` : '';
 
   return (
     <div
-      className={`route-card ${isRecommended ? 'is-recommended' : ''} ${isSelected ? 'selected' : ''}`}
+      className={`route-card ${isSelected ? 'selected' : ''} ${isRecommended ? 'is-recommended' : ''}`}
+      style={{
+        borderLeftColor: isRecommended ? 'var(--green)' : colorTheme.main,
+      }}
       onClick={() => onSelect && onSelect(route)}
       role="button"
       tabIndex={0}
-      aria-label={`Route: ${route_name}`}
+      aria-label={`Route: ${route_name || route_id}`}
       onKeyDown={(e) => e.key === 'Enter' && onSelect && onSelect(route)}
     >
-      {/* AI Recommended badge — only shown when explicitly recommended */}
+      {/* System recommendation label */}
       {isRecommended && (
         <div className="recommended-ribbon">
-          <IconSparkles size={12} />
-          <span>AI RECOMMENDED CORRIDOR</span>
+          ✓ SYSTEM RECOMMENDATION
         </div>
       )}
 
-      {/* Header */}
+      {/* Card header */}
       <div className="route-card-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          {route_id && <span className="route-id-badge">{route_id}</span>}
-          <h3 className="route-name">{route_name}</h3>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <span
+              className="route-id-badge"
+              style={{
+                color: colorTheme.main,
+                backgroundColor: colorTheme.bg,
+                borderColor: colorTheme.border,
+              }}
+            >
+              <span className="route-color-dot" style={{ backgroundColor: colorTheme.main }} />
+              {route_id || `R${index + 1}`}
+            </span>
+          </div>
+          <h3 className="route-name">{route_name || `Corridor ${index + 1}`}</h3>
         </div>
         <span className={`badge ${getRiskBadgeClass(risk_level)}`}>
-          {risk_level} RISK
+          {risk_level || 'LOW'}
         </span>
       </div>
 
-      {/* Distance & Time */}
+      {/* Operational advantages */}
+      {comparisonTags && comparisonTags.length > 0 && (
+        <div className="comparison-tags-row">
+          {comparisonTags.map((tag) => (
+            <span key={tag.label} className={`comp-tag comp-tag-${tag.type}`}>
+              {tag.label}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Primary metrics */}
       <div className="route-metrics-grid">
         <div className="metric-item">
           <span className="metric-label">Distance</span>
-          <span className="metric-value">{distance_km} km</span>
+          <span className="metric-value">{distance_km ?? '—'} km</span>
         </div>
         <div className="metric-item">
           <span className="metric-label">Transit Time</span>
-          <span className="metric-value" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <IconClock size={14} />
-            {formatTime(estimated_time_min)}
+          <span className="metric-value">{formatTime(estimated_time_min)}</span>
+        </div>
+        <div className="metric-item">
+          <span className="metric-label">Terrain Risk</span>
+          <span className="metric-value" style={{ color: getScoreColor(100 - (landslide_risk ?? 50)), fontSize: '0.88rem' }}>
+            {(risk_level || 'LOW').toUpperCase()}
+          </span>
+        </div>
+        <div className="metric-item">
+          <span className="metric-label">Accessibility Score</span>
+          <span className="metric-value" style={{ color: getScoreColor(accessibility_score) }}>
+            {accessibility_score ?? '—'}
           </span>
         </div>
       </div>
 
-      {/* Accessibility Score bar */}
+      {/* Score bar */}
       <div className="score-container">
         <div className="score-header">
           <span>Accessibility Score</span>
-          <span style={{ color: getScoreColor(accessibility_score), fontWeight: 700 }}>
-            {accessibility_score} / 100
+          <span style={{ color: getScoreColor(accessibility_score), fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+            {accessibility_score ?? '—'} / 100
           </span>
         </div>
         <div className="score-bar-bg">
           <div
             className="score-bar-fill"
             style={{
-              width: `${Math.min(100, Math.max(0, accessibility_score))}%`,
-              backgroundColor: getScoreColor(accessibility_score)
+              width: `${Math.min(100, Math.max(0, accessibility_score ?? 0))}%`,
+              backgroundColor: getScoreColor(accessibility_score),
             }}
           />
         </div>
       </div>
 
-      {/* Person 3 score breakdown — shown only when detailed data is available */}
-      {hasBreakdown && (
-        <div className="score-breakdown">
-          <div className="score-breakdown-title">Accessibility Analysis</div>
-          <div className="score-breakdown-grid">
-            <div className="breakdown-item">
-              <span className="breakdown-label">Distance Score</span>
-              <span className="breakdown-value">{distance_score}
-                {distance_weight != null && <span className="breakdown-weight"> ×{pct(distance_weight)}</span>}
-              </span>
-            </div>
-            <div className="breakdown-item">
-              <span className="breakdown-label">Time Score</span>
-              <span className="breakdown-value">{time_score}
-                {time_weight != null && <span className="breakdown-weight"> ×{pct(time_weight)}</span>}
-              </span>
-            </div>
-            <div className="breakdown-item">
-              <span className="breakdown-label">Risk Score</span>
-              <span className="breakdown-value">{risk_score}
-                {risk_weight != null && <span className="breakdown-weight"> ×{pct(risk_weight)}</span>}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Landslide indicator row */}
+      {/* Landslide risk */}
       <div className="risk-badges-row">
         <div className="landslide-indicator">
-          <IconAlertTriangle size={14} color="#f59e0b" />
-          <span>Landslide Risk: <strong>{landslide_risk}</strong></span>
-        </div>
-        <div className="landslide-indicator">
-          <IconShield size={14} color="#38bdf8" />
-          <span>{isRecommended ? 'Optimal Clearance' : 'Alternative'}</span>
+          <IconAlertTriangle size={13} color="var(--risk-medium)" />
+          <span>Landslide Exposure: <strong>{landslide_risk ?? '—'}%</strong></span>
         </div>
       </div>
     </div>

@@ -1,28 +1,28 @@
 import React from 'react';
-import { IconActivity } from './Icons';
 
 export default function Header({ backendConnected = false }) {
   return (
     <header className="marg-header">
       <div className="marg-header-brand">
         <div className="marg-logo">
-          <span>MARG</span>
+          <span className="marg-logo-wordmark">MARG</span>
           <span className="marg-logo-tag">SIH 2024</span>
         </div>
+        <div className="marg-header-separator" />
         <div className="marg-tagline">
-          Smart Route Accessibility &amp; Logistics Intelligence
+          Emergency Corridor Assessment &amp; Logistics Intelligence
         </div>
       </div>
 
-      <div className="marg-system-status" title={backendConnected ? "Backend Connected" : "Backend Standby - Ready to connect"}>
-        <span 
-          className="status-dot" 
-          style={{ 
-            backgroundColor: backendConnected ? '#10b981' : '#38bdf8',
-            boxShadow: backendConnected ? '0 0 8px #10b981' : '0 0 8px #38bdf8' 
-          }}
+      <div
+        className="marg-system-status"
+        title={backendConnected ? 'Backend connected' : 'Backend standby'}
+      >
+        <span
+          className="status-dot"
+          style={{ backgroundColor: backendConnected ? '#22c55e' : '#64748b' }}
         />
-        <span>{backendConnected ? "SYSTEM ONLINE" : "STANDBY (READY)"}</span>
+        <span>{backendConnected ? 'SYSTEM ONLINE' : 'STANDBY'}</span>
       </div>
     </header>
   );

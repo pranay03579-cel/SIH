@@ -9,7 +9,7 @@ export function EmptyState() {
       </div>
       <h3 className="state-title">Awaiting Corridor Query</h3>
       <p className="state-description">
-        Enter the origin dispatch hub, destination outpost, and mission urgency level above to calculate AI-recommended accessibility corridors.
+        Enter the origin hub, destination, and mission urgency level to evaluate and compare accessible route corridors.
       </p>
     </div>
   );

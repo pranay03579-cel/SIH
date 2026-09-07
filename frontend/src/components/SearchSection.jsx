@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { IconMapPin, IconNavigation, IconSparkles } from './Icons';
+import { IconMapPin } from './Icons';
 
 export default function SearchSection({ onSearch, isLoading = false }) {
   const [origin, setOrigin] = useState('');
@@ -8,40 +8,31 @@ export default function SearchSection({ onSearch, isLoading = false }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!origin.trim() || !destination.trim()) {
-      return;
-    }
+    if (!origin.trim() || !destination.trim()) return;
     if (onSearch) {
-      onSearch({
-        origin: origin.trim(),
-        destination: destination.trim(),
-        urgency
-      });
+      onSearch({ origin: origin.trim(), destination: destination.trim(), urgency });
     }
   };
 
   return (
     <div className="marg-search-card">
       <div className="search-section-title">
-        <IconNavigation size={14} />
-        <span>Corridor Query &amp; Dispatch</span>
+        CORRIDOR ASSESSMENT
       </div>
 
       <form className="search-form" onSubmit={handleSubmit}>
         {/* Origin */}
         <div className="input-group">
           <label className="input-label" htmlFor="origin-input">
-            Origin Hub / Dispatch Point
+            Origin Hub
           </label>
           <div className="input-wrapper">
-            <span className="input-icon">
-              <IconMapPin size={16} />
-            </span>
+            <span className="input-icon"><IconMapPin size={14} /></span>
             <input
               id="origin-input"
               type="text"
               className="text-input"
-              placeholder="e.g., Guwahati"
+              placeholder="e.g., Guwahati, Assam"
               value={origin}
               onChange={(e) => setOrigin(e.target.value)}
               required
@@ -53,17 +44,15 @@ export default function SearchSection({ onSearch, isLoading = false }) {
         {/* Destination */}
         <div className="input-group">
           <label className="input-label" htmlFor="destination-input">
-            Destination / Forward Outpost
+            Destination / Forward Post
           </label>
           <div className="input-wrapper">
-            <span className="input-icon">
-              <IconMapPin size={16} />
-            </span>
+            <span className="input-icon"><IconMapPin size={14} /></span>
             <input
               id="destination-input"
               type="text"
               className="text-input"
-              placeholder="e.g., Silchar"
+              placeholder="e.g., Silchar, Assam"
               value={destination}
               onChange={(e) => setDestination(e.target.value)}
               required
@@ -75,7 +64,7 @@ export default function SearchSection({ onSearch, isLoading = false }) {
         {/* Urgency */}
         <div className="input-group">
           <label className="input-label" htmlFor="urgency-select">
-            Mission Urgency Level
+            Mission Urgency
           </label>
           <div className="input-wrapper">
             <select
@@ -85,31 +74,28 @@ export default function SearchSection({ onSearch, isLoading = false }) {
               onChange={(e) => setUrgency(e.target.value)}
               disabled={isLoading}
             >
-              <option value="LOW">LOW — Standard Transit / Minimal Priority</option>
+              <option value="LOW">LOW — Standard Transit</option>
               <option value="MEDIUM">MEDIUM — Normal Supply Line</option>
-              <option value="HIGH">HIGH — Rapid Response / Priority Logistics</option>
-              <option value="CRITICAL">CRITICAL — Emergency Relief / High-Risk Corridor</option>
+              <option value="HIGH">HIGH — Rapid Response</option>
+              <option value="CRITICAL">CRITICAL — Emergency Relief</option>
             </select>
           </div>
         </div>
 
-        {/* Action Button */}
+        {/* Submit */}
         <button
           type="submit"
           className="search-btn"
-          id="ai-recommend-btn"
+          id="evaluate-corridors-btn"
           disabled={isLoading || !origin.trim() || !destination.trim()}
         >
           {isLoading ? (
             <>
-              <div className="loading-spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
-              <span>Analyzing Corridors...</span>
+              <div className="loading-spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
+              <span>Evaluating Corridors...</span>
             </>
           ) : (
-            <>
-              <IconSparkles size={16} />
-              <span>EVALUATE ROUTES</span>
-            </>
+            <span>EVALUATE CORRIDORS</span>
           )}
         </button>
       </form>
