@@ -230,3 +230,79 @@ def score_routes(routes: list[dict], urgency: str) -> dict[str, float]:
         {rid: s for rid, s in scores.items()},
     )
     return scores
+
+
+def score_routes_detailed(routes: list[dict], urgency: str) -> dict[str, dict]:
+    """
+    Calculate accessibility scores with full component breakdown using Person 3's engine.
+
+    This calls Person 3's score_routes_detailed() — NOT a second scoring formula.
+    Person 3's scoring_engine.py remains the single and only source of truth.
+
+    Returns a dict keyed by route_id:
+        {
+            "R1": {
+                "distance_score":   72.5,
+                "time_score":       65.0,
+                "risk_score":       75.0,
+                "distance_weight":  0.3,
+                "time_weight":      0.3,
+                "risk_weight":      0.4,
+                "accessibility_score": 71.0
+            },
+            ...
+        }
+
+    Raises:
+        HTTPException(503) if Person 3's engine is unavailable.
+        HTTPException(422) if inputs fail Person 3's validation.
+        HTTPException(500) if a returned score fails post-validation.
+    """
+    if not _P3_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Person 3's scoring engine is not available. "
+                f"Ensure {_P3_ENGINE} and {_P3_MODELS} exist and import correctly."
+            ),
+        )
+
+    if not routes:
+        raise HTTPException(
+            status_code=500,
+            detail="score_routes_detailed() received an empty route list.",
+        )
+
+    try:
+        p3_results = _P3_ENGINE_MOD.score_routes_detailed(routes, urgency)
+    except _P3_MODELS_MOD.ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Person 3 scoring engine validation error: {exc}",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Person 3 scoring engine raised an unexpected error: {exc}",
+        )
+
+    detailed: dict[str, dict] = {}
+    for result in p3_results:
+        rid   = result.route_id
+        score = _validate_score(result.accessibility_score, rid)
+        detailed[rid] = {
+            "distance_score":    round(result.distance_score, 2),
+            "time_score":        round(result.time_score, 2),
+            "risk_score":        round(result.risk_score, 2),
+            "distance_weight":   result.distance_weight,
+            "time_weight":       result.time_weight,
+            "risk_weight":       result.risk_weight,
+            "accessibility_score": score,
+        }
+
+    log.info(
+        "Person 3 detailed scoring: %d route(s) [urgency=%s]",
+        len(detailed), urgency,
+    )
+    return detailed
+

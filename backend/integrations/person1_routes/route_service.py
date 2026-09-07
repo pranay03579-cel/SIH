@@ -100,28 +100,47 @@ def _geocode(place_name: str) -> tuple[float, float]:
     Convert a place name to (latitude, longitude) using Nominatim.
 
     Returns the first result's coordinates.
-    Raises GeocodingError if nothing is found.
-    """
-    params = urllib.parse.urlencode({
-        "q": place_name,
-        "format": "json",
-        "limit": 1,
-    })
-    url = f"{NOMINATIM_URL}?{params}"
-    log.info("Geocoding: %r", place_name)
 
-    data = _http_get(url, headers={"User-Agent": "MARG-SIH-RouteService/1.0"})
+    Geocoding strategy (two attempts):
+      1. Query exactly as provided by the user.
+      2. If attempt 1 returns no results, retry with ', India' appended.
+         This handles "Guwahati, Assam" (works as-is) as well as cases where
+         adding the country name improves Nominatim's match.
+
+    Raises GeocodingError only when BOTH attempts fail — this surfaces a
+    clear, accurate error rather than silently returning wrong coordinates.
+    """
+    def _query(q: str):
+        params = urllib.parse.urlencode({
+            "q":      q,
+            "format": "json",
+            "limit":  1,
+        })
+        url = f"{NOMINATIM_URL}?{params}"
+        log.info("Geocoding: %r", q)
+        return _http_get(url, headers={"User-Agent": "MARG-SIH-RouteService/1.0"})
+
+    # Attempt 1: user's original input
+    data = _query(place_name)
+
+    # Attempt 2: append ', India' to help Nominatim narrow the region
+    if not data and not place_name.lower().strip().endswith("india"):
+        india_query = place_name.strip().rstrip(",") + ", India"
+        log.info("Retrying geocoding with country suffix: %r", india_query)
+        time.sleep(1.0)  # polite delay between Nominatim requests
+        data = _query(india_query)
 
     if not data:
         raise GeocodingError(
             f"No geocoding result for '{place_name}'. "
-            "Check spelling or try a more specific name."
+            "Check spelling — e.g. 'Guwahati, Assam' or 'Silchar, Assam'."
         )
 
     lat = float(data[0]["lat"])
     lon = float(data[0]["lon"])
     log.info("  → %.6f, %.6f", lat, lon)
     return lat, lon
+
 
 
 def _decode_geometry(geometry: dict) -> list[dict]:

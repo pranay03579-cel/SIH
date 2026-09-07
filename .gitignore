@@ -1,0 +1,33 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── Environment variables ──────────────────────────────────────────────────────
+.env
+.env.*
+
+# ── Node ──────────────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Frontend build output ──────────────────────────────────────────────────────
+frontend/dist/
+frontend/.vite/
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# NOTE: backend/integrations/person2_landslide_model/landslide_model.pkl is
+# intentionally NOT ignored — it is tracked in Git so the trained model is
+# reproducible without re-training. If the file grows beyond GitHub's 100 MB
+# limit, migrate to Git LFS.

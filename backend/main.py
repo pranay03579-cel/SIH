@@ -30,7 +30,7 @@ from pydantic import BaseModel, field_validator, model_validator
 
 from services.route_service          import get_routes, get_all_demo_routes
 from services.risk_service           import predict_risks_for_routes
-from services.scoring_service        import score_routes
+from services.scoring_service        import score_routes, score_routes_detailed
 from services.recommendation_service import merge_pipeline_data, rank_and_recommend
 
 # ============================================================
@@ -332,7 +332,26 @@ def recommend_route(request: RecommendRequest):
         enriched["risk_level"]     = risk.get("risk_level")
         routes_with_risk.append(enriched)
 
-    score_map = score_routes(routes_with_risk, urgency=request.urgency)
+    # Call Person 3's detailed scoring (single batch call — same engine, richer output).
+    # score_routes_detailed returns component scores for frontend explainability.
+    # Person 3's formula is NOT duplicated here.
+    detail_map = score_routes_detailed(routes_with_risk, urgency=request.urgency)
+
+    # Derive the simple score_map needed by recommendation_service
+    score_map = {rid: d["accessibility_score"] for rid, d in detail_map.items()}
+
+    # Embed component breakdown into routes_with_risk so it flows through to
+    # the final API response — merged by route_id, never by list position.
+    for route in routes_with_risk:
+        rid = route["route_id"]
+        if rid in detail_map:
+            d = detail_map[rid]
+            route["distance_score"]  = d["distance_score"]
+            route["time_score"]      = d["time_score"]
+            route["risk_score"]      = d["risk_score"]
+            route["distance_weight"] = d["distance_weight"]
+            route["time_weight"]     = d["time_weight"]
+            route["risk_weight"]     = d["risk_weight"]
 
     # ── Step 4: Merge all data by route_id (Person 4) ──────────────────────
     unified = merge_pipeline_data(
