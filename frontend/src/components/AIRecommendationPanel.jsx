@@ -1,12 +1,5 @@
 import React, { useState } from 'react';
-
-// ── Urgency label helpers ─────────────────────────────────────────────────
-const URGENCY_META = {
-  LOW:      { label: 'Low Urgency',      color: 'var(--risk-low)',      bgColor: 'var(--risk-low-bg)',      borderColor: 'var(--risk-low-border)' },
-  MEDIUM:   { label: 'Medium Urgency',   color: 'var(--risk-medium)',   bgColor: 'var(--risk-medium-bg)',   borderColor: 'var(--risk-medium-border)' },
-  HIGH:     { label: 'High Urgency',     color: 'var(--risk-high)',     bgColor: 'var(--risk-high-bg)',     borderColor: 'var(--risk-high-border)' },
-  CRITICAL: { label: 'Critical Urgency', color: 'var(--risk-critical)', bgColor: 'var(--risk-critical-bg)', borderColor: 'var(--risk-critical-border)' },
-};
+import { IconCheck, IconShield } from './Icons';
 
 const PCT = (w) => (w != null ? `${Math.round(w * 100)}%` : '—');
 
@@ -18,150 +11,135 @@ function fmtTime(mins) {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
-// ── Top 3 selection rationale bullets ────────────────────────────────────
-function buildTopReasons(winner, allRoutes) {
-  const bullets = [];
+function buildKeyReasons(winner, allRoutes) {
+  const reasons = [];
   const others = allRoutes.filter(r => r.route_id !== winner.route_id);
 
-  bullets.push({
-    text: `Highest accessibility score: <strong>${winner.accessibility_score} / 100</strong>`,
-    type: 'score',
-  });
+  reasons.push(`Superior composite accessibility rating: <strong>${winner.accessibility_score} / 100</strong>`);
 
   if (others.length > 0) {
     const minOtherRisk = Math.min(...others.map(r => r.landslide_risk ?? Infinity));
     if ((winner.landslide_risk ?? 0) <= minOtherRisk) {
-      bullets.push({
-        text: `Lowest terrain exposure: <strong>${winner.landslide_risk}%</strong>`,
-        type: 'risk',
-      });
+      reasons.push(`Lowest hazard vulnerability along corridor: <strong>${winner.landslide_risk}% (${winner.risk_level})</strong>`);
     }
     const minOtherTime = Math.min(...others.map(r => r.estimated_time_min ?? Infinity));
     if ((winner.estimated_time_min ?? 0) <= minOtherTime) {
-      bullets.push({ text: `Fastest transit: <strong>${fmtTime(winner.estimated_time_min)}</strong>`, type: 'time' });
+      reasons.push(`Fastest estimated transit: <strong>${fmtTime(winner.estimated_time_min)}</strong>`);
     } else {
-      const minOtherDist = Math.min(...others.map(r => r.distance_km ?? Infinity));
-      if ((winner.distance_km ?? Infinity) <= minOtherDist) {
-        bullets.push({ text: `Shortest corridor: <strong>${winner.distance_km} km</strong>`, type: 'distance' });
-      }
+      reasons.push(`Travel time of <strong>${fmtTime(winner.estimated_time_min)}</strong> fits mission urgency`);
     }
+  } else {
+    reasons.push(`Safe road corridor verified for dispatch`);
   }
 
-  return bullets.slice(0, 3);
+  return reasons;
 }
 
-// ── Score bar ─────────────────────────────────────────────────────────────
-function ScoreBar({ label, score, weight, color }) {
-  const pct = Math.min(100, Math.max(0, score ?? 0));
-  return (
-    <div className="ai-panel-score-row">
-      <div className="ai-panel-score-meta">
-        <span className="ai-panel-score-label">{label}</span>
-        <span className="ai-panel-score-nums" style={{ color }}>
-          {score ?? '—'}<span className="ai-panel-score-weight"> × {PCT(weight)}</span>
-        </span>
-      </div>
-      <div className="ai-panel-bar-bg">
-        <div className="ai-panel-bar-fill" style={{ width: `${pct}%`, backgroundColor: color }} />
-      </div>
-    </div>
-  );
-}
-
-// ── Main panel ────────────────────────────────────────────────────────────
-export default function AIRecommendationPanel({ recommendedRoute: r, allRoutes, urgency = 'MEDIUM' }) {
+export default function AIRecommendationPanel({ recommendedRoute: r, allRoutes = [], urgency = 'MEDIUM' }) {
   const [showCalc, setShowCalc] = useState(false);
   if (!r) return null;
 
-  const uMeta = URGENCY_META[urgency] || URGENCY_META.MEDIUM;
-  const bullets = buildTopReasons(r, allRoutes);
+  const reasons = buildKeyReasons(r, allRoutes);
   const hasBreakdown = r.distance_score != null && r.time_score != null && r.risk_score != null;
 
   return (
-    <div className="ai-rec-panel" id="ai-recommendation-panel">
-
-      {/* Header */}
-      <div className="ai-rec-panel-header">
-        <div className="ai-rec-panel-title">
-          SYSTEM RECOMMENDATION — {r.route_id}
-        </div>
-        <span
-          className="ai-rec-urgency-badge"
-          style={{
-            color: uMeta.color,
-            borderColor: uMeta.borderColor,
-            backgroundColor: uMeta.bgColor,
-          }}
-        >
-          {uMeta.label}
-        </span>
+    <div className="recommendation-card-container" id="ai-recommendation-panel">
+      {/* Stepper Tag */}
+      <div className="rec-stepper-row">
+        <span className="rec-stepper-badge">06 WHY THIS ROUTE?</span>
       </div>
 
-      {/* Route name */}
-      <div className="ai-rec-route-name-row">{r.route_name}</div>
+      {/* Main recommendation banner */}
+      <div className="rec-banner-card">
+        <div className="rec-banner-left">
+          <div className="rec-badge-row">
+            <span className="rec-star-badge">
+              <IconCheck size={12} style={{ marginRight: 4 }} />
+              RECOMMENDED CORRIDOR
+            </span>
+            <span className="rec-urgency-tag">Urgency: {urgency}</span>
+          </div>
+          <h2 className="rec-corridor-name">[{r.route_id}] {r.route_name}</h2>
+          <div className="rec-key-stats-row">
+            <div className="rec-stat-col">
+              <span className="rec-stat-lbl">Distance</span>
+              <span className="rec-stat-val">{r.distance_km ?? '—'} km</span>
+            </div>
+            <div className="rec-stat-col">
+              <span className="rec-stat-lbl">Transit Time</span>
+              <span className="rec-stat-val">{fmtTime(r.estimated_time_min)}</span>
+            </div>
+            <div className="rec-stat-col">
+              <span className="rec-stat-lbl">Terrain Risk</span>
+              <span className="rec-stat-val">{r.landslide_risk ?? '—'}% ({r.risk_level})</span>
+            </div>
+          </div>
+        </div>
 
-      {/* Hero metrics — 4 key operational values */}
-      <div className="ai-rec-hero-metrics">
-        <div className="ai-rec-hero-item">
-          <span className="ai-rec-hero-value" style={{ color: 'var(--green-text)' }}>{r.accessibility_score}</span>
-          <span className="ai-rec-hero-label">Score / 100</span>
-        </div>
-        <div className="ai-rec-hero-item">
-          <span className="ai-rec-hero-value">{r.distance_km ?? '—'}</span>
-          <span className="ai-rec-hero-label">Distance km</span>
-        </div>
-        <div className="ai-rec-hero-item">
-          <span className="ai-rec-hero-value">{fmtTime(r.estimated_time_min)}</span>
-          <span className="ai-rec-hero-label">Transit Time</span>
-        </div>
-        <div className="ai-rec-hero-item">
-          <span
-            className="ai-rec-hero-value"
-            style={{
-              color: (r.risk_level || '').toUpperCase() === 'LOW' ? 'var(--risk-low)'
-                : (r.risk_level || '').toUpperCase() === 'MEDIUM' ? 'var(--risk-medium)'
-                : (r.risk_level || '').toUpperCase() === 'HIGH' ? 'var(--risk-high)'
-                : 'var(--risk-critical)',
-              fontSize: '0.9rem',
-            }}
-          >
-            {(r.risk_level || 'LOW').toUpperCase()}
-          </span>
-          <span className="ai-rec-hero-label">Terrain Risk</span>
+        {/* Circular score badge */}
+        <div className="rec-score-circle-wrapper">
+          <div className="rec-score-circle">
+            <span className="rec-score-number">{r.accessibility_score}</span>
+            <span className="rec-score-unit">/ 100</span>
+          </div>
+          <span className="rec-score-caption">Accessibility Index</span>
         </div>
       </div>
 
-      {/* Selection rationale */}
-      {bullets.length > 0 && (
-        <ul className="ai-rec-rationale-list">
-          {bullets.map((b, i) => (
-            <li key={i} className={`ai-rec-rationale-item ai-rec-item-${b.type}`}>
-              <span className="ai-rec-item-icon">—</span>
-              <span dangerouslySetInnerHTML={{ __html: b.text }} />
+      {/* Why MARG selected this route checklist */}
+      <div className="rec-reasons-card">
+        <h3 className="rec-card-heading">Why MARG Selected This Corridor</h3>
+        <ul className="rec-reasons-list">
+          {reasons.map((text, idx) => (
+            <li key={idx} className="rec-reason-item">
+              <span className="rec-reason-icon"><IconCheck size={14} /></span>
+              <span dangerouslySetInnerHTML={{ __html: text }} />
             </li>
           ))}
         </ul>
-      )}
 
-      {/* Expandable: scoring methodology */}
-      {hasBreakdown && (
-        <button type="button" className="ai-rec-expand-btn" onClick={() => setShowCalc(c => !c)}>
-          {showCalc ? '▲ Hide scoring detail' : '▼ View scoring breakdown'}
-        </button>
-      )}
+        {/* Toggle scoring calculation */}
+        {hasBreakdown && (
+          <button
+            type="button"
+            className="rec-toggle-btn"
+            onClick={() => setShowCalc(c => !c)}
+          >
+            <span>{showCalc ? 'Hide Score Breakdown' : 'View Score Breakdown'}</span>
+          </button>
+        )}
 
-      {hasBreakdown && showCalc && (
-        <div className="ai-rec-breakdown">
-          <div className="ai-rec-breakdown-title">Weighted Score Components</div>
-          <ScoreBar label="Distance"     score={r.distance_score} weight={r.distance_weight} color="var(--blue-light)" />
-          <ScoreBar label="Transit Time" score={r.time_score}    weight={r.time_weight}     color="var(--risk-medium)" />
-          <ScoreBar label="Terrain Risk" score={r.risk_score}    weight={r.risk_weight}     color="var(--risk-low)" />
-        </div>
-      )}
-
-      {/* Methodology disclosure */}
-      <div className="ai-rec-disclosure">
-        Selected by MARG Accessibility Scoring Engine using urgency-weighted min-max normalisation across terrain, distance, and transit metrics.
+        {hasBreakdown && showCalc && (
+          <div className="rec-breakdown-box">
+            <div className="rec-breakdown-row">
+              <div className="rec-breakdown-meta">
+                <span>Distance Efficiency ({PCT(r.distance_weight)})</span>
+                <span>{r.distance_score} pts</span>
+              </div>
+              <div className="rec-breakdown-track">
+                <div className="rec-breakdown-fill" style={{ width: `${r.distance_score}%`, backgroundColor: 'var(--pale-blue-dark)' }} />
+              </div>
+            </div>
+            <div className="rec-breakdown-row">
+              <div className="rec-breakdown-meta">
+                <span>Transit Time ({PCT(r.time_weight)})</span>
+                <span>{r.time_score} pts</span>
+              </div>
+              <div className="rec-breakdown-track">
+                <div className="rec-breakdown-fill" style={{ width: `${r.time_score}%`, backgroundColor: 'var(--soft-peach-dark)' }} />
+              </div>
+            </div>
+            <div className="rec-breakdown-row">
+              <div className="rec-breakdown-meta">
+                <span>Terrain Safety ({PCT(r.risk_weight)})</span>
+                <span>{r.risk_score} pts</span>
+              </div>
+              <div className="rec-breakdown-track">
+                <div className="rec-breakdown-fill" style={{ width: `${r.risk_score}%`, backgroundColor: 'var(--forest-green)' }} />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

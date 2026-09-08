@@ -33,6 +33,14 @@ from services.risk_service           import predict_risks_for_routes
 from services.scoring_service        import score_routes, score_routes_detailed
 from services.recommendation_service import merge_pipeline_data, rank_and_recommend
 
+# Emergency rerouting uses coordinate-based routing from Person 1's module
+import sys as _sys
+from pathlib import Path as _Path
+_P1_DIR = str(_Path(__file__).parent / "integrations" / "person1_routes")
+if _P1_DIR not in _sys.path:
+    _sys.path.insert(0, _P1_DIR)
+import route_service as _p1_module
+
 # ============================================================
 # APP SETUP
 # ============================================================
@@ -114,9 +122,114 @@ class RecommendRequest(BaseModel):
         return self
 
 
+class CoordinatePoint(BaseModel):
+    """A geographic coordinate point (WGS84)."""
+    lat: float
+    lon: float
+
+    @field_validator("lat", mode="before")
+    @classmethod
+    def validate_lat(cls, v: float) -> float:
+        if not isinstance(v, (int, float)) or not (-90.0 <= v <= 90.0):
+            raise ValueError(f"lat must be a number in [-90, 90]. Got: {v!r}")
+        return float(v)
+
+    @field_validator("lon", mode="before")
+    @classmethod
+    def validate_lon(cls, v: float) -> float:
+        if not isinstance(v, (int, float)) or not (-180.0 <= v <= 180.0):
+            raise ValueError(f"lon must be a number in [-180, 180]. Got: {v!r}")
+        return float(v)
+
+
+class RerouteRequest(BaseModel):
+    """
+    Request body for POST /reroute — Emergency Dynamic Rerouting.
+
+    current_location : vehicle's actual GPS position (becomes new origin)
+    destination      : original named destination (geocoded normally)
+    blocked_location : landslide incident position (used for route filtering)
+    urgency          : emergency urgency level (same values as /recommend-route)
+    """
+    current_location: CoordinatePoint
+    destination:      str
+    blocked_location: CoordinatePoint
+    urgency:          str = "HIGH"
+
+    @field_validator("destination", mode="before")
+    @classmethod
+    def strip_destination(cls, v: str) -> str:
+        stripped = v.strip() if isinstance(v, str) else ""
+        if not stripped:
+            raise ValueError("'destination' must not be empty.")
+        return stripped
+
+    @field_validator("urgency", mode="before")
+    @classmethod
+    def validate_urgency(cls, v: str) -> str:
+        normalized = v.upper().strip() if isinstance(v, str) else ""
+        if normalized not in VALID_URGENCY_VALUES:
+            raise ValueError(
+                f"Invalid urgency '{v}'. "
+                f"Allowed values: {', '.join(sorted(VALID_URGENCY_VALUES))}"
+            )
+        return normalized
+
+
 # ============================================================
 # HELPERS
 # ============================================================
+
+import math
+
+# Minimum safe distance from a blocked incident location (configurable).
+# Any route that passes within this radius of the landslide
+# is considered blocked and excluded from emergency alternatives.
+BLOCK_RADIUS_METERS = 300.0
+BLOCKED_RADIUS_METERS = BLOCK_RADIUS_METERS
+
+
+def _haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in metres between two WGS84 points."""
+    R = 6_371_000.0  # Earth radius in metres
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def _route_intersects_blocked_zone(
+    route_coordinates: list,
+    blocked_lat: float,
+    blocked_lon: float,
+    radius_m: float = BLOCK_RADIUS_METERS,
+) -> bool:
+    """
+    Return True if ANY coordinate in the route passes within radius_m metres
+    of the blocked incident location.
+    """
+    for coord in route_coordinates:
+        lat = coord.get("lat") if isinstance(coord, dict) else (coord[0] if isinstance(coord, (list, tuple)) else None)
+        lon = coord.get("lon") if isinstance(coord, dict) else (coord[1] if isinstance(coord, (list, tuple)) else None)
+        if lat is None or lon is None:
+            continue
+        if _haversine_meters(lat, lon, blocked_lat, blocked_lon) <= radius_m:
+            return True
+    return False
+
+
+def _route_passes_near_incident(
+    route: dict,
+    blocked_lat: float,
+    blocked_lon: float,
+    radius_m: float = BLOCK_RADIUS_METERS,
+) -> bool:
+    """Convenience wrapper checking a route object against the blocked zone."""
+    return _route_intersects_blocked_zone(
+        route.get("coordinates", []), blocked_lat, blocked_lon, radius_m=radius_m
+    )
+
 
 def _require_both_or_neither(raw_query_params, origin: Optional[str], destination: Optional[str]) -> None:
     """
@@ -372,3 +485,323 @@ def recommend_route(request: RecommendRequest):
         "recommended_route":    recommended_route,
         "routes":               ranked,
     }
+
+
+# ============================================================
+# EMERGENCY REROUTING ENDPOINT
+# ============================================================
+
+@app.post("/reroute", tags=["Emergency Rerouting"])
+def emergency_reroute(request: RerouteRequest):
+    """
+    Emergency Dynamic Rerouting — Phase 5.
+
+    Triggered when a landslide is detected during a vehicle simulation.
+    Generates new route alternatives from the vehicle's current position
+    to the original destination, filters out routes passing through the
+    blocked zone, scores them through the full MARG pipeline, and returns
+    the best emergency alternative.
+
+    Pipeline:
+    1. get_routes_from_coords()        Person 1 (coord-based, skips geocoding)
+    2. _route_passes_near_incident()   Blocked-zone filter (haversine)
+    3. predict_risks_for_routes()      Person 2 — ML landslide risk
+    4. score_routes_detailed()         Person 3 — accessibility scoring
+    5. merge_pipeline_data()           Person 4 — unified route objects
+    6. rank_and_recommend()            Person 4 — rank + recommend
+
+    NOTE on OSRM limitation:
+        OSRM's public server does not support live road closures. We request
+        multiple alternative routes and discard any that pass within
+        BLOCKED_RADIUS_METERS of the landslide coordinates. This is a
+        transparent MVP-safe approximation — the comment is in the code.
+
+    Request body:
+        {
+          "current_location": {"lat": 26.123, "lon": 91.456},
+          "destination": "Tezpur, Assam",
+          "blocked_location": {"lat": 26.200, "lon": 91.600},
+          "urgency": "HIGH"
+        }
+    """
+    cur = request.current_location
+    blk = request.blocked_location
+
+    # Validate: vehicle and blocked positions must be real coordinates
+    if cur.lat == 0.0 and cur.lon == 0.0:
+        raise HTTPException(
+            status_code=422,
+            detail="current_location appears invalid (0.0, 0.0). Vehicle position was not set.",
+        )
+
+    import logging as _log
+    logger = _log.getLogger("emergency_rerouting")
+
+    logger.info("Emergency rerouting started for destination: '%s'", request.destination)
+
+    fallback_diversion_used = False
+    raw_routes: list[dict] = []
+    safe_routes: list[dict] = []
+    blocked_count = 0
+
+    # ── Strategy 1: Normal OSRM alternatives from vehicle coordinates ────────
+    try:
+        raw_routes = _p1_module.get_routes_from_coords(
+            orig_lat=cur.lat,
+            orig_lon=cur.lon,
+            destination=request.destination,
+            origin_label=f"Emergency Origin ({cur.lat:.4f},{cur.lon:.4f})",
+        )
+        safe_routes = [
+            r for r in raw_routes
+            if not _route_passes_near_incident(
+                r, blk.lat, blk.lon, radius_m=BLOCK_RADIUS_METERS
+            )
+        ]
+        blocked_count = len(raw_routes) - len(safe_routes)
+    except _p1_module.GeocodingRateLimitError:
+        raise HTTPException(
+            status_code=503,
+            detail="Location service temporarily busy. Please try again in a moment.",
+        )
+    except _p1_module.GeocodingError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Destination could not be geocoded: {exc}",
+        )
+    except Exception as exc:
+        logger.warning("Strategy 1 direct routing failed (%s) — falling back to Strategy 2", exc)
+
+    # ── Strategy 2: Diversion waypoint fallback around landslide zone ────────
+    if not safe_routes:
+        fallback_diversion_used = True
+        logger.info("Strategy 1 returned 0 safe routes — executing Strategy 2 diversion waypoints...")
+        try:
+            safe_routes = _p1_module.get_diversion_routes(
+                orig_lat=cur.lat,
+                orig_lon=cur.lon,
+                blocked_lat=blk.lat,
+                blocked_lon=blk.lon,
+                destination=request.destination,
+                radius_m=BLOCK_RADIUS_METERS,
+                origin_label=f"Emergency Origin ({cur.lat:.4f},{cur.lon:.4f})",
+            )
+        except _p1_module.GeocodingRateLimitError:
+            raise HTTPException(
+                status_code=503,
+                detail="Location service temporarily busy. Please try again in a moment.",
+            )
+        except _p1_module.GeocodingError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Destination could not be geocoded: {exc}",
+            )
+        except _p1_module.RoutingError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No safe alternative corridor could be generated around the incident: {exc}",
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Emergency diversion routing service error: {exc}",
+            )
+
+    candidate_total = len(raw_routes) if not fallback_diversion_used else (len(raw_routes) + len(safe_routes))
+
+    # Log required diagnostics
+    logger.info("Candidate routes received: %d", candidate_total)
+    logger.info("Routes blocked: %d", blocked_count)
+    logger.info("Safe routes found: %d", len(safe_routes))
+    logger.info("Fallback diversion strategy used: %s", "Yes" if fallback_diversion_used else "No")
+
+    if not safe_routes:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No safe alternative corridor could be generated from the current location. "
+                f"All candidate route(s) passed within {BLOCK_RADIUS_METERS:.0f}m "
+                f"of the blocked incident zone."
+            ),
+        )
+
+    # ── Step 3: Person 2 — predict landslide risk for each safe route ────────
+    risk_map = predict_risks_for_routes(safe_routes)
+
+    # ── Step 4: Person 3 — accessibility scoring (reuses existing pipeline) ──
+    routes_with_risk = []
+    for route in safe_routes:
+        rid = route["route_id"]
+        enriched = {**route}
+        if rid not in risk_map:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Route '{rid}' has no risk prediction — Person 2 must score all routes.",
+            )
+        risk = risk_map[rid]
+        landslide_risk = risk.get("landslide_risk")
+        if landslide_risk is None:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Route '{rid}': Person 2 returned no 'landslide_risk' value.",
+            )
+        enriched["landslide_risk"] = landslide_risk
+        enriched["risk_level"]     = risk.get("risk_level")
+        routes_with_risk.append(enriched)
+
+    detail_map = score_routes_detailed(routes_with_risk, urgency=request.urgency)
+    score_map  = {rid: d["accessibility_score"] for rid, d in detail_map.items()}
+
+    for route in routes_with_risk:
+        rid = route["route_id"]
+        if rid in detail_map:
+            d = detail_map[rid]
+            route["distance_score"]  = d["distance_score"]
+            route["time_score"]      = d["time_score"]
+            route["risk_score"]      = d["risk_score"]
+            route["distance_weight"] = d["distance_weight"]
+            route["time_weight"]     = d["time_weight"]
+            route["risk_weight"]     = d["risk_weight"]
+
+    # ── Step 5 & 6: Person 4 — merge, rank, recommend ────────────────────────
+    unified = merge_pipeline_data(
+        routes    = routes_with_risk,
+        risk_map  = risk_map,
+        score_map = score_map,
+    )
+    ranked = rank_and_recommend(unified)
+    recommended_route = ranked[0]
+
+    return {
+        "current_location":        {"lat": cur.lat, "lon": cur.lon},
+        "destination":             request.destination,
+        "blocked_location":        {"lat": blk.lat, "lon": blk.lon},
+        "urgency":                 request.urgency,
+        "blocked_routes_count":    blocked_count,
+        "candidate_routes_count":  candidate_total,
+        "safe_routes_count":       len(safe_routes),
+        "fallback_diversion_used": fallback_diversion_used,
+        "recommended_route_id":    recommended_route["route_id"],
+        "recommended_route":       recommended_route,
+        "routes":                  ranked,
+    }
+
+
+# ============================================================
+# LOCATION AUTOCOMPLETE & GEOCODING PROXY
+# Free, open geocoding with Northeast India proximity bias
+# ============================================================
+
+import urllib.request as _urllib_request
+import urllib.parse as _urllib_parse
+import json as _json
+
+@app.get("/locations/search")
+@app.get("/location-suggestions")
+def search_locations(q: str = Query(..., min_length=1, description="Location search query")):
+    """
+    Open geocoding autocomplete proxy.
+    Returns normalized place suggestions prioritized for Northeast India.
+    No frontend API keys required.
+    """
+    q_clean = q.strip()
+    if not q_clean or len(q_clean) < 2:
+        return []
+
+    results = []
+    seen = set()
+
+    # 1. Curated NE India fallback dictionary for instantaneous, highly accurate local hits
+    try:
+        from integrations.person1_routes.route_service import _DEMO_FALLBACK_COORDS
+        q_lower = q_clean.lower()
+        for name, (lat, lon) in _DEMO_FALLBACK_COORDS.items():
+            if name.startswith(q_lower) or q_lower in name:
+                title = name.title()
+                base_city = title.split(",")[0].strip()
+                state = "Assam"
+                for st in ["Meghalaya", "Arunachal Pradesh", "Manipur", "Mizoram", "Nagaland", "Tripura", "Sikkim", "Assam"]:
+                    if st.lower() in name:
+                        state = st
+                        break
+
+                clean_display = f"{base_city}, {state}, India"
+                key = f"{base_city.lower()}_{state.lower()}"
+                if key not in seen:
+                    seen.add(key)
+                    results.append({
+                        "name": base_city,
+                        "display_name": clean_display,
+                        "lat": lat,
+                        "lon": lon,
+                        "state": state,
+                        "is_northeast": True,
+                        "is_india": True
+                    })
+    except Exception:
+        pass
+
+    # 2. Live query to Photon (OpenStreetMap geocoder) with Northeast India proximity bias
+    try:
+        params = _urllib_parse.urlencode({
+            "q": q_clean,
+            "limit": 10,
+            "lat": 26.2,
+            "lon": 92.5,
+            "lang": "en"
+        })
+        url = f"https://photon.komoot.io/api/?{params}"
+        req = _urllib_request.Request(url, headers={"User-Agent": "MARG-Logistics-Platform/1.0"})
+        with _urllib_request.urlopen(req, timeout=3.5) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+            for feature in data.get("features", []):
+                props = feature.get("properties", {})
+                coords = feature.get("geometry", {}).get("coordinates", [])
+                if len(coords) >= 2:
+                    lon, lat = coords[0], coords[1]
+                    name = props.get("name") or props.get("city") or q_clean
+                    state = props.get("state", "")
+                    country = props.get("country", "India")
+                    district = props.get("district") or props.get("county") or ""
+
+                    parts = []
+                    if district and district != name:
+                        parts.append(district)
+                    if state and state != name:
+                        parts.append(state)
+                    if country and country != state:
+                        parts.append(country)
+
+                    display_name = f"{name}, {', '.join(parts)}" if parts else name
+                    key = f"{name.lower()}_{state.lower()}"
+
+                    if key not in seen:
+                        seen.add(key)
+                        ne_states = {"assam", "meghalaya", "arunachal pradesh", "manipur", "mizoram", "nagaland", "tripura", "sikkim"}
+                        is_ne = any(st in (state.lower() + " " + display_name.lower()) for st in ne_states)
+                        is_india = country.lower() == "india" or "india" in display_name.lower()
+
+                        results.append({
+                            "name": name,
+                            "display_name": display_name,
+                            "lat": lat,
+                            "lon": lon,
+                            "state": state or ("Northeast India" if is_ne else country),
+                            "is_northeast": is_ne,
+                            "is_india": is_india
+                        })
+    except Exception:
+        pass
+
+    # Sort results: Northeast India first, then all India, then global
+    def sort_key(r):
+        if r.get("is_northeast"):
+            return 0
+        if r.get("is_india"):
+            return 1
+        return 2
+
+    results.sort(key=sort_key)
+    return results[:8]
+
+

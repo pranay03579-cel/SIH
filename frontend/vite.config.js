@@ -24,6 +24,23 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true
       },
+      '/reroute': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
+            console.error('[Vite proxy] /reroute → FastAPI error:', err.message);
+          });
+        }
+      },
+      '/locations': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true
+      },
+      '/location-suggestions': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true
+      },
       '/health': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,

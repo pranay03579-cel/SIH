@@ -278,35 +278,79 @@ def _geocode(place_name: str) -> tuple[float, float]:
     Convert a place name to (latitude, longitude).
 
     Lookup order:
-      1. In-memory cache  — instant, no network call.
-      2. Demo-safe fallback dictionary — instant, no network call.
-         Covers common Northeast India locations for reliable demo operation.
-      3. Nominatim live query — with retry/backoff and polite delays.
+      1. Coordinate literal parsing ("lat, lon") — instant.
+      2. In-memory cache  — instant, no network call.
+      3. Demo-safe fallback dictionary (exact, stripped, and city-prefix match) — instant.
+      4. Live Photon Open Geocoding (with Northeast India proximity bias) — fast, open.
+      5. Nominatim live query — with retry/backoff and polite delays.
+      6. Substring fallback matching on curated dictionary — guaranteed graceful operation.
 
     Raises:
-      GeocodingRateLimitError – if Nominatim is temporarily rate-limiting.
-      GeocodingError          – if the location cannot be found.
+      GeocodingError – if the location cannot be resolved.
     """
+    p = place_name.strip()
+
+    # ── 1. Coordinate literal parsing ─────────────────────────────────────────
+    import re
+    coord_match = re.match(r"^([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)$", p)
+    if coord_match:
+        lat, lon = float(coord_match.group(1)), float(coord_match.group(2))
+        log.info("Geocoding literal coordinates: %r → %.6f, %.6f", place_name, lat, lon)
+        return lat, lon
+
     key = _cache_key(place_name)
 
-    # ── 1. Cache hit ─────────────────────────────────────────────────────────
+    # ── 2. Cache hit ─────────────────────────────────────────────────────────
     if key in _GEOCODE_CACHE:
         lat, lon = _GEOCODE_CACHE[key]
         log.info("Geocoding cache hit: %r → %.6f, %.6f", place_name, lat, lon)
         return lat, lon
 
-    # ── 2. Demo-safe fallback dictionary ─────────────────────────────────────
+    # ── 3. Demo-safe fallback dictionary & normalized matching ────────────────
     if key in _DEMO_FALLBACK_COORDS:
         lat, lon = _DEMO_FALLBACK_COORDS[key]
-        log.info(
-            "Geocoding demo fallback: %r → %.6f, %.6f (no Nominatim call)",
-            place_name, lat, lon,
-        )
-        # Populate cache so subsequent calls are also instant
+        log.info("Geocoding demo fallback: %r → %.6f, %.6f", place_name, lat, lon)
         _GEOCODE_CACHE[key] = (lat, lon)
         return lat, lon
 
-    # ── 3. Live Nominatim query ───────────────────────────────────────────────
+    stripped_key = key.replace(", india", "").strip()
+    if stripped_key in _DEMO_FALLBACK_COORDS:
+        lat, lon = _DEMO_FALLBACK_COORDS[stripped_key]
+        log.info("Geocoding demo fallback (stripped): %r → %.6f, %.6f", place_name, lat, lon)
+        _GEOCODE_CACHE[key] = (lat, lon)
+        return lat, lon
+
+    city_key = stripped_key.split(",")[0].strip()
+    if city_key in _DEMO_FALLBACK_COORDS:
+        lat, lon = _DEMO_FALLBACK_COORDS[city_key]
+        log.info("Geocoding demo fallback (city): %r → %.6f, %.6f", place_name, lat, lon)
+        _GEOCODE_CACHE[key] = (lat, lon)
+        return lat, lon
+
+    # ── 4. Live Photon Open Geocoding (Komoot / OSM) ──────────────────────────
+    try:
+        photon_params = urllib.parse.urlencode({
+            "q": p,
+            "limit": 1,
+            "lat": 26.2,
+            "lon": 92.5,
+            "lang": "en"
+        })
+        photon_url = f"https://photon.komoot.io/api/?{photon_params}"
+        req = urllib.request.Request(photon_url, headers={"User-Agent": "MARG-Logistics-Platform/1.0"})
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            features = data.get("features", [])
+            if features:
+                coords = features[0]["geometry"]["coordinates"]
+                lat, lon = float(coords[1]), float(coords[0])
+                log.info("Geocoding via Photon: %r → %.6f, %.6f", place_name, lat, lon)
+                _GEOCODE_CACHE[key] = (lat, lon)
+                return lat, lon
+    except Exception as photon_exc:
+        log.warning("Photon geocoding notice: %s — falling back to Nominatim / local dictionary", photon_exc)
+
+    # ── 5. Live Nominatim query ───────────────────────────────────────────────
     def _query_nominatim(q: str) -> list:
         params = urllib.parse.urlencode({
             "q":      q,
@@ -315,31 +359,34 @@ def _geocode(place_name: str) -> tuple[float, float]:
         })
         url = f"{NOMINATIM_URL}?{params}"
         log.info("Geocoding via Nominatim: %r", q)
-        return _http_get_with_retry(url, headers=_NOMINATIM_HEADERS)
+        return _http_get_with_retry(url, headers=_NOMINATIM_HEADERS, max_retries=1)
 
-    # Attempt 1: user's original input
-    data = _query_nominatim(place_name)
+    try:
+        data = _query_nominatim(place_name)
+        if not data and not key.endswith("india"):
+            india_query = place_name.strip().rstrip(",") + ", India"
+            data = _query_nominatim(india_query)
 
-    # Attempt 2: append ', India' if no result and not already India-suffixed
-    if not data and not key.endswith("india"):
-        india_query = place_name.strip().rstrip(",") + ", India"
-        log.info("Retrying geocoding with country suffix: %r", india_query)
-        time.sleep(1.0)   # polite delay between Nominatim requests
-        data = _query_nominatim(india_query)
+        if data:
+            lat = float(data[0]["lat"])
+            lon = float(data[0]["lon"])
+            log.info("  → %.6f, %.6f (Nominatim)", lat, lon)
+            _GEOCODE_CACHE[key] = (lat, lon)
+            return lat, lon
+    except Exception as nom_exc:
+        log.warning("Nominatim geocoding failed (%s) — checking substring dictionary fallback", nom_exc)
 
-    if not data:
-        raise GeocodingError(
-            f"Location could not be found: '{place_name}'. "
-            "Please check the spelling and try again — e.g. 'Guwahati, Assam'."
-        )
+    # ── 6. Substring fallback match ────────────────────────────────────────────
+    for dict_key, coords in _DEMO_FALLBACK_COORDS.items():
+        if dict_key in key or key in dict_key:
+            log.info("Geocoding fuzzy fallback: %r → %.6f, %.6f", place_name, coords[0], coords[1])
+            _GEOCODE_CACHE[key] = coords
+            return coords
 
-    lat = float(data[0]["lat"])
-    lon = float(data[0]["lon"])
-    log.info("  → %.6f, %.6f (Nominatim)", lat, lon)
-
-    # Cache successful result
-    _GEOCODE_CACHE[key] = (lat, lon)
-    return lat, lon
+    raise GeocodingError(
+        f"Location could not be found: '{place_name}'. "
+        "Please check the spelling and try again — e.g. 'Guwahati, Assam'."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -556,6 +603,307 @@ def get_routes(origin: str, destination: str) -> list[dict]:
         len(routes), origin, destination,
     )
     return routes
+
+
+# ---------------------------------------------------------------------------
+# Coordinate-based routing — for emergency rerouting from vehicle position
+# ---------------------------------------------------------------------------
+
+def get_routes_from_coords(
+    orig_lat: float, orig_lon: float,
+    destination: str,
+    origin_label: str = "Vehicle Position",
+) -> list[dict]:
+    """
+    Fetch driving routes from a raw coordinate pair to a named destination.
+
+    This is used by the /reroute endpoint so the vehicle's current GPS
+    position (lat, lon) can be used directly as the new origin without
+    requiring a geocodable city name.
+
+    Geocoding is skipped for the origin (we already have coordinates).
+    The destination is still geocoded through the normal cache/fallback
+    pipeline.
+
+    Parameters
+    ----------
+    orig_lat      : float  – Vehicle's current latitude.
+    orig_lon      : float  – Vehicle's current longitude.
+    destination   : str    – Named destination (geocoded normally).
+    origin_label  : str    – Human-readable label for the origin in route objects.
+
+    Returns
+    -------
+    list[dict]  – Route objects conforming to the team contract.
+
+    Raises
+    ------
+    GeocodingError    – If destination cannot be geocoded.
+    RoutingError      – If OSRM returns no routes.
+    RouteServiceError – On network/HTTP errors.
+    """
+    if MOCK_MODE:
+        routes = _mock_routes(origin_label, destination)
+        _validate_routes(routes)
+        return routes
+
+    # Geocode destination only — origin is already a coordinate pair
+    dest_lat, dest_lon = _geocode(destination)
+
+    # Build OSRM request directly from coordinates (no geocoding needed for origin)
+    coords_str = f"{orig_lon},{orig_lat};{dest_lon},{dest_lat}"
+    params = urllib.parse.urlencode({
+        "alternatives": "true",
+        "geometries":   "geojson",
+        "overview":     "full",
+        "steps":        "false",
+    })
+    osrm_url = f"{OSRM_BASE_URL}/{coords_str}?{params}"
+    log.info("OSRM emergency reroute request: %s", osrm_url)
+
+    time.sleep(OSRM_REQUEST_DELAY_SEC)
+    response = _http_get(osrm_url)
+
+    osrm_code = response.get("code", "")
+    if osrm_code != "Ok":
+        raise RoutingError(
+            f"OSRM returned non-Ok status for emergency reroute: '{osrm_code}'. "
+            f"Message: {response.get('message', 'no message')}."
+        )
+
+    raw_routes = response.get("routes", [])
+    if not raw_routes:
+        raise RoutingError(
+            f"OSRM returned zero routes from current vehicle position to '{destination}'."
+        )
+
+    routes: list[dict] = []
+    for idx, raw in enumerate(raw_routes, start=1):
+        leg = raw.get("legs", [{}])[0]
+        leg_totals = {
+            "distance": raw.get("distance", leg.get("distance", 0)),
+            "duration": raw.get("duration", leg.get("duration", 0)),
+        }
+        geometry = raw.get("geometry", {"type": "LineString", "coordinates": []})
+        route_obj = _build_route_object(idx, leg_totals, geometry, origin_label, destination)
+        routes.append(route_obj)
+
+    _validate_routes(routes)
+    log.info(
+        "Emergency reroute: %d route(s) from (%.4f, %.4f) → '%s'.",
+        len(routes), orig_lat, orig_lon, destination,
+    )
+    return routes
+
+
+# ---------------------------------------------------------------------------
+# Emergency Rerouting Helpers & Diversion Strategy
+# ---------------------------------------------------------------------------
+
+def haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in metres between two WGS84 points."""
+    import math
+    R = 6_371_000.0  # Earth radius in metres
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def _route_intersects_blocked_zone(
+    route_coordinates: list,
+    blocked_lat: float,
+    blocked_lon: float,
+    radius_m: float = 300.0,
+) -> bool:
+    """
+    Return True if ANY coordinate in the route passes within radius_m metres
+    of the blocked incident location (blocked_lat, blocked_lon).
+    """
+    for coord in route_coordinates:
+        lat = coord.get("lat") if isinstance(coord, dict) else (coord[0] if isinstance(coord, (list, tuple)) else None)
+        lon = coord.get("lon") if isinstance(coord, dict) else (coord[1] if isinstance(coord, (list, tuple)) else None)
+        if lat is None or lon is None:
+            continue
+        if haversine_meters(lat, lon, blocked_lat, blocked_lon) <= radius_m:
+            return True
+    return False
+
+
+def get_diversion_routes(
+    orig_lat: float,
+    orig_lon: float,
+    blocked_lat: float,
+    blocked_lon: float,
+    destination: str,
+    radius_m: float = 300.0,
+    origin_label: str = "Emergency Origin",
+    max_routes: int = 3,
+) -> list[dict]:
+    """
+    Generate real OSRM alternative routes that bypass a blocked incident zone
+    by querying OSRM via strategically placed diversion waypoints around the landslide.
+
+    Strategy:
+    1. Geocode destination (using cache / fallback / Nominatim).
+    2. Compute geometric lateral perpendicular vectors and radial offsets around the incident.
+    3. Concurrently query OSRM for 3-waypoint driving routes:
+       Vehicle Position -> Diversion Waypoint -> Destination
+    4. Reject any candidate route that intersects the blocked incident zone within radius_m.
+    5. Deduplicate and select up to max_routes distinct real OSRM corridors.
+    6. Return standardised, validated MARG route objects.
+    """
+    import math
+    import concurrent.futures
+
+    if MOCK_MODE:
+        routes = _mock_routes(origin_label, destination)
+        _validate_routes(routes)
+        return routes
+
+    dest_lat, dest_lon = _geocode(destination)
+
+    # Calculate direction vector from vehicle to blocked location in km
+    avg_lat = (orig_lat + blocked_lat) / 2.0
+    dx_km = (blocked_lon - orig_lon) * math.cos(math.radians(avg_lat)) * 111.0
+    dy_km = (blocked_lat - orig_lat) * 111.0
+    dist_km = math.sqrt(dx_km * dx_km + dy_km * dy_km)
+
+    candidates: list[tuple[float, float, str]] = []
+
+    # Perpendicular unit vectors
+    if dist_km > 0.05:
+        px1, py1 = -dy_km / dist_km, dx_km / dist_km
+        px2, py2 = dy_km / dist_km, -dx_km / dist_km
+    else:
+        px1, py1 = 0.0, 1.0
+        px2, py2 = 0.0, -1.0
+
+    # A. Lateral offsets from Midpoint between vehicle and blocked incident
+    mid_lat = (orig_lat + blocked_lat) / 2.0
+    mid_lon = (orig_lon + blocked_lon) / 2.0
+    for offset_km in [6.0, 12.0, 20.0, 30.0, 45.0]:
+        dlat1 = (py1 * offset_km) / 111.0
+        dlon1 = (px1 * offset_km) / (111.0 * math.cos(math.radians(mid_lat)))
+        dlat2 = (py2 * offset_km) / 111.0
+        dlon2 = (px2 * offset_km) / (111.0 * math.cos(math.radians(mid_lat)))
+        candidates.append((mid_lat + dlat1, mid_lon + dlon1, f"mid_left_{int(offset_km)}km"))
+        candidates.append((mid_lat + dlat2, mid_lon + dlon2, f"mid_right_{int(offset_km)}km"))
+
+    # B. Lateral offsets from Blocked Incident position
+    for offset_km in [6.0, 12.0, 20.0, 30.0, 45.0]:
+        dlat1 = (py1 * offset_km) / 111.0
+        dlon1 = (px1 * offset_km) / (111.0 * math.cos(math.radians(blocked_lat)))
+        dlat2 = (py2 * offset_km) / 111.0
+        dlon2 = (px2 * offset_km) / (111.0 * math.cos(math.radians(blocked_lat)))
+        candidates.append((blocked_lat + dlat1, blocked_lon + dlon1, f"blk_left_{int(offset_km)}km"))
+        candidates.append((blocked_lat + dlat2, blocked_lon + dlon2, f"blk_right_{int(offset_km)}km"))
+
+    # C. Polar / radial ring offsets around the blocked incident
+    for r_km in [15.0, 25.0, 40.0]:
+        r_deg_lat = r_km / 111.0
+        r_deg_lon = r_km / (111.0 * math.cos(math.radians(blocked_lat)))
+        for angle_deg in [45, 135, 225, 315]:
+            rad = math.radians(angle_deg)
+            candidates.append((
+                blocked_lat + r_deg_lat * math.sin(rad),
+                blocked_lon + r_deg_lon * math.cos(rad),
+                f"polar_{angle_deg}deg_{int(r_km)}km",
+            ))
+
+    def _query_waypoint_route(candidate: tuple[float, float, str]) -> Optional[dict]:
+        wp_lat, wp_lon, label = candidate
+        coords_str = f"{orig_lon},{orig_lat};{wp_lon},{wp_lat};{dest_lon},{dest_lat}"
+        params = urllib.parse.urlencode({
+            "overview": "full",
+            "geometries": "geojson",
+            "steps": "false",
+        })
+        url = f"{OSRM_BASE_URL}/{coords_str}?{params}"
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "MARG-SIH-Emergency-Reroute/1.0"
+            })
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SEC) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if data.get("code") == "Ok" and data.get("routes"):
+                    raw = data["routes"][0]
+                    geom = raw.get("geometry", {})
+                    coords = _decode_geometry(geom)
+                    if not coords:
+                        return None
+                    # Verify route avoids the blocked incident zone
+                    if _route_intersects_blocked_zone(coords, blocked_lat, blocked_lon, radius_m=radius_m):
+                        return None
+                    dist_km = round(raw.get("distance", 0) / 1000.0, 2)
+                    time_min = round(raw.get("duration", 0) / 60.0, 1)
+                    if dist_km <= 0 or time_min <= 0:
+                        return None
+                    return {
+                        "distance_km": dist_km,
+                        "estimated_time_min": time_min,
+                        "coordinates": coords,
+                        "label": label,
+                    }
+        except Exception as exc:
+            log.debug("Waypoint query for %s failed: %s", label, exc)
+            return None
+        return None
+
+    # Execute candidate queries in parallel
+    raw_safe_candidates: list[dict] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(_query_waypoint_route, c) for c in candidates]
+        for f in concurrent.futures.as_completed(futures):
+            res = f.result()
+            if res is not None:
+                raw_safe_candidates.append(res)
+
+    if not raw_safe_candidates:
+        raise RoutingError(
+            f"No safe diversion route could be generated avoiding the incident at ({blocked_lat:.4f}, {blocked_lon:.4f})."
+        )
+
+    # Sort by transit time and distance
+    raw_safe_candidates.sort(key=lambda r: (r["estimated_time_min"], r["distance_km"]))
+
+    # Deduplicate routes: skip routes with nearly identical distance and transit time
+    deduped: list[dict] = []
+    for cand in raw_safe_candidates:
+        is_duplicate = False
+        for accepted in deduped:
+            dist_diff = abs(cand["distance_km"] - accepted["distance_km"])
+            time_diff = abs(cand["estimated_time_min"] - accepted["estimated_time_min"])
+            if dist_diff < 1.0 and time_diff < 2.0:
+                is_duplicate = True
+                break
+        if not is_duplicate:
+            deduped.append(cand)
+            if len(deduped) >= max_routes:
+                break
+
+    # Build standard MARG route objects
+    routes: list[dict] = []
+    for idx, d in enumerate(deduped, start=1):
+        route_obj = {
+            "route_id": f"R{idx}",
+            "origin": origin_label,
+            "destination": destination,
+            "route_name": f"Emergency Alternative {idx}",
+            "distance_km": d["distance_km"],
+            "estimated_time_min": d["estimated_time_min"],
+            "coordinates": d["coordinates"],
+        }
+        routes.append(route_obj)
+
+    _validate_routes(routes)
+    log.info(
+        "Generated %d safe emergency diversion route(s) avoiding incident at (%.4f, %.4f).",
+        len(routes), blocked_lat, blocked_lon,
+    )
+    return routes
+
 
 
 # ---------------------------------------------------------------------------
