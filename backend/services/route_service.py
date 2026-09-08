@@ -238,10 +238,15 @@ def get_routes(origin: str, destination: str) -> list[dict]:
     try:
         import route_service as _p1
         routes = _p1.get_routes(origin, destination)
+    except _p1.GeocodingRateLimitError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Location service is temporarily busy. Please try again in a moment.",
+        )
     except _p1.GeocodingError as exc:
         raise HTTPException(
             status_code=404,
-            detail=f"Geocoding failed: {exc}",
+            detail=f"Location could not be found: {exc}",
         )
     except _p1.RoutingError as exc:
         raise HTTPException(

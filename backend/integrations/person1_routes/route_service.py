@@ -20,6 +20,13 @@ Output contract:
     "coordinates": [{"lat": 26.1445, "lon": 91.7362}, ...]
   }
 ]
+
+GEOCODING RESILIENCE (added for demo reliability):
+  1. In-memory cache — successful geocodes are cached for the process lifetime.
+  2. Demo-safe fallback coordinates — hardcoded for common NE India locations
+     so that repeated demo queries never hit Nominatim unnecessarily.
+  3. Retry with exponential backoff — handles transient 429 / 5xx errors.
+  4. Descriptive User-Agent and clear error differentiation.
 """
 
 import os
@@ -38,9 +45,13 @@ from typing import Optional
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 OSRM_BASE_URL = "https://router.project-osrm.org/route/v1/driving"
 
-# OSRM public demo server rate-limit is ~1 req/s; be respectful.
 REQUEST_TIMEOUT_SEC = 15
-OSRM_REQUEST_DELAY_SEC = 1.0   # polite delay between calls
+OSRM_REQUEST_DELAY_SEC = 1.0   # polite delay between OSRM calls
+
+# Maximum Nominatim retries for transient errors (429 / 5xx / timeout)
+NOMINATIM_MAX_RETRIES = 3
+# Base backoff in seconds (doubles on each retry: 1s, 2s, 4s)
+NOMINATIM_BACKOFF_BASE = 1.0
 
 # Set env var ROUTE_MOCK=1 to force mock mode (useful when offline).
 MOCK_MODE = os.environ.get("ROUTE_MOCK", "0").strip() == "1"
@@ -63,85 +74,277 @@ class GeocodingError(RouteServiceError):
     """Raised when a place name cannot be geocoded."""
 
 
+class GeocodingRateLimitError(GeocodingError):
+    """Raised when Nominatim is temporarily rate-limiting us (429)."""
+
+
 class RoutingError(RouteServiceError):
     """Raised when the routing API returns no usable routes."""
+
+
+# ---------------------------------------------------------------------------
+# Demo-safe fallback coordinates
+# ---------------------------------------------------------------------------
+# Purpose: Prevent unnecessary Nominatim calls for commonly tested NE India
+# locations during SIH demos. These are NOT a replacement for live geocoding —
+# any location NOT in this dictionary still goes through Nominatim normally.
+#
+# Source: Verified via Nominatim / OpenStreetMap.
+# Format: lowercase normalised key → (latitude, longitude)
+
+_DEMO_FALLBACK_COORDS: dict[str, tuple[float, float]] = {
+    # ── Assam ──────────────────────────────────────────────────────────────
+    "guwahati":                 (26.180598,  91.753943),
+    "guwahati, assam":          (26.180598,  91.753943),
+    "silchar":                  (24.827403,  92.797942),
+    "silchar, assam":           (24.827403,  92.797942),
+    "tezpur":                   (26.622993,  92.797608),
+    "tezpur, assam":            (26.622993,  92.797608),
+    "jorhat":                   (26.757526,  94.203470),
+    "jorhat, assam":            (26.757526,  94.203470),
+    "dibrugarh":                (27.480920,  94.903130),
+    "dibrugarh, assam":         (27.480920,  94.903130),
+    "nagaon":                   (26.344980,  92.688290),
+    "nagaon, assam":            (26.344980,  92.688290),
+    "bongaigaon":               (26.481530,  90.560020),
+    "bongaigaon, assam":        (26.481530,  90.560020),
+    "haflong":                  (25.168990,  93.020640),
+    "haflong, assam":           (25.168990,  93.020640),
+    "diphu":                    (25.837530,  93.435830),
+    "diphu, assam":             (25.837530,  93.435830),
+    # ── Meghalaya ──────────────────────────────────────────────────────────
+    "shillong":                 (25.578773,  91.893253),
+    "shillong, meghalaya":      (25.578773,  91.893253),
+    "tura":                     (25.514400,  90.213800),
+    "tura, meghalaya":          (25.514400,  90.213800),
+    # ── Manipur ────────────────────────────────────────────────────────────
+    "imphal":                   (24.817000,  93.937000),
+    "imphal, manipur":          (24.817000,  93.937000),
+    "churachandpur":            (24.332900,  93.683500),
+    "churachandpur, manipur":   (24.332900,  93.683500),
+    # ── Tripura ────────────────────────────────────────────────────────────
+    "agartala":                 (23.831457,  91.286778),
+    "agartala, tripura":        (23.831457,  91.286778),
+    # ── Mizoram ────────────────────────────────────────────────────────────
+    "aizawl":                   (23.727111,  92.717636),
+    "aizawl, mizoram":          (23.727111,  92.717636),
+    "lunglei":                  (22.888100,  92.735400),
+    "lunglei, mizoram":         (22.888100,  92.735400),
+    # ── Nagaland ───────────────────────────────────────────────────────────
+    "kohima":                   (25.674270,  94.111290),
+    "kohima, nagaland":         (25.674270,  94.111290),
+    "dimapur":                  (25.906990,  93.726220),
+    "dimapur, nagaland":        (25.906990,  93.726220),
+    # ── Arunachal Pradesh ──────────────────────────────────────────────────
+    "itanagar":                 (27.084770,  93.606870),
+    "itanagar, arunachal pradesh": (27.084770, 93.606870),
+    "pasighat":                 (28.066400,  95.323900),
+    "pasighat, arunachal pradesh": (28.066400, 95.323900),
+    # ── Sikkim ─────────────────────────────────────────────────────────────
+    "gangtok":                  (27.329231,  88.612179),
+    "gangtok, sikkim":          (27.329231,  88.612179),
+}
+
+
+# ---------------------------------------------------------------------------
+# In-memory geocoding cache
+# ---------------------------------------------------------------------------
+# Stores results of successful Nominatim lookups for the process lifetime.
+# Key: normalised (lowercase, stripped) location string.
+# Value: (latitude, longitude) tuple.
+# Demo-fallback hits are also stored here to unify the lookup path.
+
+_GEOCODE_CACHE: dict[str, tuple[float, float]] = {}
+
+
+def _cache_key(place_name: str) -> str:
+    """Normalise a place name to a consistent cache key."""
+    return place_name.strip().lower()
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _http_get(url: str, headers: Optional[dict] = None) -> dict:
+def _http_get_with_retry(
+    url: str,
+    headers: Optional[dict] = None,
+    max_retries: int = NOMINATIM_MAX_RETRIES,
+    backoff_base: float = NOMINATIM_BACKOFF_BASE,
+) -> dict | list:
     """
-    Perform a simple HTTP GET and return the parsed JSON body.
-    Raises RouteServiceError on any network or HTTP error.
+    Perform an HTTP GET with exponential backoff retry for transient errors.
+
+    Retries on:
+      - HTTP 429 Too Many Requests
+      - HTTP 5xx Server errors
+      - Network/timeout errors
+
+    Does NOT retry on:
+      - HTTP 4xx client errors (except 429), e.g. 404 Not Found
     """
     req = urllib.request.Request(url, headers=headers or {})
-    try:
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SEC) as resp:
-            body = resp.read().decode("utf-8")
-            return json.loads(body)
-    except urllib.error.HTTPError as exc:
-        raise RouteServiceError(
-            f"HTTP {exc.code} from {url}: {exc.reason}"
-        ) from exc
-    except urllib.error.URLError as exc:
-        raise RouteServiceError(
-            f"Network error reaching {url}: {exc.reason}"
-        ) from exc
-    except json.JSONDecodeError as exc:
-        raise RouteServiceError(
-            f"Invalid JSON response from {url}"
-        ) from exc
+    last_exc: Optional[Exception] = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SEC) as resp:
+                body = resp.read().decode("utf-8")
+                return json.loads(body)
+
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            status = exc.code
+
+            # Rate limited — wait longer and retry
+            if status == 429:
+                wait = backoff_base * (2 ** (attempt - 1))
+                log.warning(
+                    "Nominatim rate limit (429) on attempt %d/%d. "
+                    "Waiting %.1fs before retry.",
+                    attempt, max_retries, wait,
+                )
+                if attempt < max_retries:
+                    time.sleep(wait)
+                    continue
+                # All retries exhausted on 429
+                raise GeocodingRateLimitError(
+                    "Location service is temporarily busy (rate limited). "
+                    "Please try again in a moment."
+                ) from exc
+
+            # Server error — retry
+            if 500 <= status < 600:
+                wait = backoff_base * (2 ** (attempt - 1))
+                log.warning(
+                    "HTTP %d server error on attempt %d/%d. "
+                    "Waiting %.1fs before retry.",
+                    status, attempt, max_retries, wait,
+                )
+                if attempt < max_retries:
+                    time.sleep(wait)
+                    continue
+                raise RouteServiceError(
+                    f"HTTP {status} from {url}: {exc.reason}"
+                ) from exc
+
+            # Other 4xx — not retryable
+            raise RouteServiceError(
+                f"HTTP {status} from {url}: {exc.reason}"
+            ) from exc
+
+        except urllib.error.URLError as exc:
+            last_exc = exc
+            wait = backoff_base * (2 ** (attempt - 1))
+            log.warning(
+                "Network error on attempt %d/%d: %s. Waiting %.1fs.",
+                attempt, max_retries, exc.reason, wait,
+            )
+            if attempt < max_retries:
+                time.sleep(wait)
+                continue
+            raise RouteServiceError(
+                f"Network error reaching {url}: {exc.reason}"
+            ) from exc
+
+        except json.JSONDecodeError as exc:
+            raise RouteServiceError(
+                f"Invalid JSON response from {url}"
+            ) from exc
+
+    # Should not reach here, but belt-and-suspenders
+    raise RouteServiceError(
+        f"All {max_retries} attempts failed for {url}. Last error: {last_exc}"
+    )
+
+
+def _http_get(url: str, headers: Optional[dict] = None) -> dict | list:
+    """Backward-compatible wrapper around _http_get_with_retry."""
+    return _http_get_with_retry(url, headers=headers)
+
+
+_NOMINATIM_HEADERS = {
+    "User-Agent": (
+        "MARG-SIH-2024-Route-Accessibility-Project/1.0 "
+        "(Smart India Hackathon; emergency logistics; contact: marg-sih@example.com)"
+    ),
+    "Accept-Language": "en",
+    "Accept": "application/json",
+}
 
 
 def _geocode(place_name: str) -> tuple[float, float]:
     """
-    Convert a place name to (latitude, longitude) using Nominatim.
+    Convert a place name to (latitude, longitude).
 
-    Returns the first result's coordinates.
+    Lookup order:
+      1. In-memory cache  — instant, no network call.
+      2. Demo-safe fallback dictionary — instant, no network call.
+         Covers common Northeast India locations for reliable demo operation.
+      3. Nominatim live query — with retry/backoff and polite delays.
 
-    Geocoding strategy (two attempts):
-      1. Query exactly as provided by the user.
-      2. If attempt 1 returns no results, retry with ', India' appended.
-         This handles "Guwahati, Assam" (works as-is) as well as cases where
-         adding the country name improves Nominatim's match.
-
-    Raises GeocodingError only when BOTH attempts fail — this surfaces a
-    clear, accurate error rather than silently returning wrong coordinates.
+    Raises:
+      GeocodingRateLimitError – if Nominatim is temporarily rate-limiting.
+      GeocodingError          – if the location cannot be found.
     """
-    def _query(q: str):
+    key = _cache_key(place_name)
+
+    # ── 1. Cache hit ─────────────────────────────────────────────────────────
+    if key in _GEOCODE_CACHE:
+        lat, lon = _GEOCODE_CACHE[key]
+        log.info("Geocoding cache hit: %r → %.6f, %.6f", place_name, lat, lon)
+        return lat, lon
+
+    # ── 2. Demo-safe fallback dictionary ─────────────────────────────────────
+    if key in _DEMO_FALLBACK_COORDS:
+        lat, lon = _DEMO_FALLBACK_COORDS[key]
+        log.info(
+            "Geocoding demo fallback: %r → %.6f, %.6f (no Nominatim call)",
+            place_name, lat, lon,
+        )
+        # Populate cache so subsequent calls are also instant
+        _GEOCODE_CACHE[key] = (lat, lon)
+        return lat, lon
+
+    # ── 3. Live Nominatim query ───────────────────────────────────────────────
+    def _query_nominatim(q: str) -> list:
         params = urllib.parse.urlencode({
             "q":      q,
             "format": "json",
             "limit":  1,
         })
         url = f"{NOMINATIM_URL}?{params}"
-        log.info("Geocoding: %r", q)
-        return _http_get(url, headers={"User-Agent": "MARG-SIH-RouteService/1.0"})
+        log.info("Geocoding via Nominatim: %r", q)
+        return _http_get_with_retry(url, headers=_NOMINATIM_HEADERS)
 
     # Attempt 1: user's original input
-    data = _query(place_name)
+    data = _query_nominatim(place_name)
 
-    # Attempt 2: append ', India' to help Nominatim narrow the region
-    if not data and not place_name.lower().strip().endswith("india"):
+    # Attempt 2: append ', India' if no result and not already India-suffixed
+    if not data and not key.endswith("india"):
         india_query = place_name.strip().rstrip(",") + ", India"
         log.info("Retrying geocoding with country suffix: %r", india_query)
-        time.sleep(1.0)  # polite delay between Nominatim requests
-        data = _query(india_query)
+        time.sleep(1.0)   # polite delay between Nominatim requests
+        data = _query_nominatim(india_query)
 
     if not data:
         raise GeocodingError(
-            f"No geocoding result for '{place_name}'. "
-            "Check spelling — e.g. 'Guwahati, Assam' or 'Silchar, Assam'."
+            f"Location could not be found: '{place_name}'. "
+            "Please check the spelling and try again — e.g. 'Guwahati, Assam'."
         )
 
     lat = float(data[0]["lat"])
     lon = float(data[0]["lon"])
-    log.info("  → %.6f, %.6f", lat, lon)
+    log.info("  → %.6f, %.6f (Nominatim)", lat, lon)
+
+    # Cache successful result
+    _GEOCODE_CACHE[key] = (lat, lon)
     return lat, lon
 
 
+# ---------------------------------------------------------------------------
+# Geometry decoding
+# ---------------------------------------------------------------------------
 
 def _decode_geometry(geometry: dict) -> list[dict]:
     """
@@ -271,25 +474,14 @@ def get_routes(origin: str, destination: str) -> list[dict]:
 
     Returns
     -------
-    list[dict]  – List of route objects conforming to the team contract:
-        [
-          {
-            "route_id":           "R1",
-            "origin":             "Guwahati",
-            "destination":        "Silchar",
-            "route_name":         "Route 1",
-            "distance_km":        180.0,
-            "estimated_time_min": 240.0,
-            "coordinates":        [{"lat": ..., "lon": ...}, ...]
-          },
-          ...
-        ]
+    list[dict]  – List of route objects conforming to the team contract.
 
     Raises
     ------
-    GeocodingError   – If origin or destination cannot be geocoded.
-    RoutingError     – If the routing API returns no usable routes.
-    RouteServiceError – On network / HTTP errors.
+    GeocodingError        – If origin or destination cannot be geocoded.
+    GeocodingRateLimitError – If Nominatim is temporarily rate-limiting.
+    RoutingError          – If the routing API returns no usable routes.
+    RouteServiceError     – On unrecoverable network / HTTP errors.
     """
     # ---- 0. Mock mode (offline dev only) -----------------------------------
     if MOCK_MODE:
@@ -298,9 +490,17 @@ def get_routes(origin: str, destination: str) -> list[dict]:
         return routes
 
     # ---- 1. Geocode --------------------------------------------------------
+    # Cache + demo-fallback means frequently tested locations skip Nominatim.
+    # Only uncached/unknown locations trigger a live network request.
     orig_lat, orig_lon = _geocode(origin)
-    # Polite delay between Nominatim requests
-    time.sleep(1.0)
+
+    # Polite delay only before a live Nominatim call (not cache hits)
+    origin_key = _cache_key(origin)
+    dest_key = _cache_key(destination)
+    # We need a delay between Nominatim calls; skip if destination is cached
+    if dest_key not in _GEOCODE_CACHE and dest_key not in _DEMO_FALLBACK_COORDS:
+        time.sleep(1.0)
+
     dest_lat, dest_lon = _geocode(destination)
 
     # ---- 2. Build OSRM request ---------------------------------------------
