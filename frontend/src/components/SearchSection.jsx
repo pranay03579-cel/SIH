@@ -7,6 +7,7 @@ export default function SearchSection({ onSearch, isLoading = false }) {
   const [originLocation, setOriginLocation] = useState(null);
   const [destinationLocation, setDestinationLocation] = useState(null);
   const [urgency, setUrgency] = useState('MEDIUM');
+  const [vehicleType, setVehicleType] = useState('CAR');
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -16,6 +17,8 @@ export default function SearchSection({ onSearch, isLoading = false }) {
         origin: origin.trim(),
         destination: destination.trim(),
         urgency,
+        vehicle_type: vehicleType,
+        vehicleType,
         originLocation,
         destinationLocation
       });
@@ -141,6 +144,29 @@ export default function SearchSection({ onSearch, isLoading = false }) {
               <option value="MEDIUM">MEDIUM — Normal Supply Line (Balanced)</option>
               <option value="HIGH">HIGH — Rapid Response (Time Sensitive)</option>
               <option value="CRITICAL">CRITICAL — Emergency Relief (Maximum Speed)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Vehicle Type Selector */}
+        <div className="planner-input-group">
+          <label className="planner-input-label" htmlFor="vehicle-select">
+            Transport Vehicle Profile
+          </label>
+          <div className="planner-input-wrapper">
+            <select
+              id="vehicle-select"
+              className="planner-select-input"
+              value={vehicleType}
+              onChange={(e) => setVehicleType(e.target.value)}
+              disabled={isLoading}
+            >
+              <option value="CAR">CAR — Standard Passenger Car</option>
+              <option value="BIKE">BIKE — Motorcycle / 2-Wheeler</option>
+              <option value="SUV">SUV — All-Terrain SUV</option>
+              <option value="BUS">BUS — Passenger Bus / Heavy Transit</option>
+              <option value="TRUCK">TRUCK — Heavy Logistics Truck</option>
+              <option value="AMBULANCE">AMBULANCE — Emergency Medical Vehicle</option>
             </select>
           </div>
         </div>

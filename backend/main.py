@@ -32,6 +32,7 @@ from services.route_service          import get_routes, get_all_demo_routes
 from services.risk_service           import predict_risks_for_routes
 from services.scoring_service        import score_routes, score_routes_detailed
 from services.recommendation_service import merge_pipeline_data, rank_and_recommend
+from services.vehicle_service       import VALID_VEHICLE_TYPES, calculate_vehicle_suitability
 
 # Emergency rerouting uses coordinate-based routing from Person 1's module
 import sys as _sys
@@ -62,14 +63,16 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",    # Create React App
-        "http://localhost:5173",    # Vite
+        "http://localhost:3000",
+        "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Accept", "Authorization"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # ============================================================
@@ -84,9 +87,10 @@ VALID_URGENCY_VALUES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
 # ============================================================
 
 class RecommendRequest(BaseModel):
-    origin:      str
-    destination: str
-    urgency:     str = "MEDIUM"
+    origin:       str
+    destination:  str
+    urgency:      str = "MEDIUM"
+    vehicle_type: str = "CAR"
 
     @field_validator("origin", "destination", mode="before")
     @classmethod
@@ -108,6 +112,20 @@ class RecommendRequest(BaseModel):
             raise ValueError(
                 f"Invalid urgency '{v}'. "
                 f"Allowed values: {', '.join(sorted(VALID_URGENCY_VALUES))}"
+            )
+        return normalized
+
+    @field_validator("vehicle_type", mode="before")
+    @classmethod
+    def validate_vehicle_type(cls, v: str) -> str:
+        """Normalise and validate vehicle_type. Accepts any case."""
+        normalized = v.upper().strip() if isinstance(v, str) else ""
+        if not normalized:
+            return "CAR"
+        if normalized not in VALID_VEHICLE_TYPES:
+            raise ValueError(
+                f"Invalid vehicle_type '{v}'. "
+                f"Allowed values: {', '.join(sorted(VALID_VEHICLE_TYPES))}"
             )
         return normalized
 
@@ -150,11 +168,13 @@ class RerouteRequest(BaseModel):
     destination      : original named destination (geocoded normally)
     blocked_location : landslide incident position (used for route filtering)
     urgency          : emergency urgency level (same values as /recommend-route)
+    vehicle_type     : vehicle type for suitability scoring (CAR, TRUCK, etc.)
     """
     current_location: CoordinatePoint
     destination:      str
     blocked_location: CoordinatePoint
     urgency:          str = "HIGH"
+    vehicle_type:     Optional[str] = "CAR"
 
     @field_validator("destination", mode="before")
     @classmethod
@@ -172,6 +192,21 @@ class RerouteRequest(BaseModel):
             raise ValueError(
                 f"Invalid urgency '{v}'. "
                 f"Allowed values: {', '.join(sorted(VALID_URGENCY_VALUES))}"
+            )
+        return normalized
+
+    @field_validator("vehicle_type", mode="before")
+    @classmethod
+    def validate_vehicle_type(cls, v: Optional[str]) -> str:
+        if v is None:
+            return "CAR"
+        normalized = v.upper().strip() if isinstance(v, str) else ""
+        if not normalized:
+            return "CAR"
+        if normalized not in VALID_VEHICLE_TYPES:
+            raise ValueError(
+                f"Invalid vehicle_type '{v}'. "
+                f"Allowed values: {', '.join(sorted(VALID_VEHICLE_TYPES))}"
             )
         return normalized
 
@@ -294,9 +329,15 @@ def _require_both_or_neither(raw_query_params, origin: Optional[str], destinatio
 # ============================================================
 
 @app.get("/", tags=["Health"])
-def health_check():
+def root_check():
     """Check if the MARG backend is running."""
     return {"status": "MARG Backend Running"}
+
+
+@app.get("/health", tags=["Health"])
+def health_check():
+    """Health check endpoint for frontend and monitoring."""
+    return {"status": "ok"}
 
 
 @app.get("/routes", tags=["Routes"])
@@ -441,8 +482,13 @@ def recommend_route(request: RecommendRequest):
                 ),
             )
 
-        enriched["landslide_risk"] = landslide_risk
-        enriched["risk_level"]     = risk.get("risk_level")
+        enriched["landslide_risk"]       = landslide_risk
+        enriched["risk_level"]           = risk.get("risk_level")
+        enriched["landslide_risk_level"] = risk.get("landslide_risk_level", risk.get("risk_level"))
+        enriched["waterlogging_risk"]    = risk.get("waterlogging_risk")
+        enriched["waterlogging_level"]   = risk.get("waterlogging_level")
+        enriched["waterlogging_factors"] = risk.get("waterlogging_factors")
+        enriched["combined_hazard_risk"] = risk.get("combined_hazard_risk", landslide_risk)
         routes_with_risk.append(enriched)
 
     # Call Person 3's detailed scoring (single batch call — same engine, richer output).
@@ -473,14 +519,15 @@ def recommend_route(request: RecommendRequest):
         score_map = score_map,
     )
 
-    # ── Step 5: Rank and select recommendation (Person 4) ──────────────────
-    ranked = rank_and_recommend(unified)
+    # ── Step 5: Rank and select recommendation (Person 4 & Vehicle Layer) ──
+    ranked = rank_and_recommend(unified, vehicle_type=request.vehicle_type)
     recommended_route = ranked[0]
 
     return {
         "origin":               request.origin,
         "destination":          request.destination,
         "urgency":              request.urgency,
+        "vehicle_type":         request.vehicle_type,
         "recommended_route_id": recommended_route["route_id"],
         "recommended_route":    recommended_route,
         "routes":               ranked,
@@ -645,8 +692,13 @@ def emergency_reroute(request: RerouteRequest):
                 status_code=503,
                 detail=f"Route '{rid}': Person 2 returned no 'landslide_risk' value.",
             )
-        enriched["landslide_risk"] = landslide_risk
-        enriched["risk_level"]     = risk.get("risk_level")
+        enriched["landslide_risk"]       = landslide_risk
+        enriched["risk_level"]           = risk.get("risk_level")
+        enriched["landslide_risk_level"] = risk.get("landslide_risk_level", risk.get("risk_level"))
+        enriched["waterlogging_risk"]    = risk.get("waterlogging_risk")
+        enriched["waterlogging_level"]   = risk.get("waterlogging_level")
+        enriched["waterlogging_factors"] = risk.get("waterlogging_factors")
+        enriched["combined_hazard_risk"] = risk.get("combined_hazard_risk", landslide_risk)
         routes_with_risk.append(enriched)
 
     detail_map = score_routes_detailed(routes_with_risk, urgency=request.urgency)
@@ -669,7 +721,7 @@ def emergency_reroute(request: RerouteRequest):
         risk_map  = risk_map,
         score_map = score_map,
     )
-    ranked = rank_and_recommend(unified)
+    ranked = rank_and_recommend(unified, vehicle_type=request.vehicle_type)
     recommended_route = ranked[0]
 
     return {
@@ -677,6 +729,7 @@ def emergency_reroute(request: RerouteRequest):
         "destination":             request.destination,
         "blocked_location":        {"lat": blk.lat, "lon": blk.lon},
         "urgency":                 request.urgency,
+        "vehicle_type":            request.vehicle_type,
         "blocked_routes_count":    blocked_count,
         "candidate_routes_count":  candidate_total,
         "safe_routes_count":       len(safe_routes),

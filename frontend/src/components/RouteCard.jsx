@@ -25,13 +25,38 @@ export default function RouteCard({
     estimated_time_min,
     landslide_risk,
     risk_level,
+    landslide_risk_level,
+    waterlogging_risk,
+    waterlogging_level,
+    combined_hazard_risk,
     accessibility_score,
-  } = route;
+    vehicle_type,
+    vehicle_suitability,
+    vehicle_compatible,
+    vehicle_reason,
+    vehicle_aware_score,
+  } = (route || {});
 
-  const colorTheme = ROUTE_PALETTE[index % ROUTE_PALETTE.length];
+  const colorTheme = ROUTE_PALETTE[Math.max(0, index || 0) % ROUTE_PALETTE.length] || ROUTE_PALETTE[0];
+  const effectiveLandslideLevel = (landslide_risk_level || risk_level || 'LOW').toUpperCase();
+  const effectiveWaterloggingLevel = waterlogging_level
+    ? waterlogging_level.toUpperCase()
+    : (waterlogging_risk != null ? (waterlogging_risk >= 60 ? 'HIGH' : waterlogging_risk >= 30 ? 'MEDIUM' : 'LOW') : null);
+  const effectiveHazardRisk = combined_hazard_risk != null ? combined_hazard_risk : landslide_risk;
+
+  const getOverallLevel = () => {
+    if (combined_hazard_risk != null) {
+      if (combined_hazard_risk >= 60) return 'HIGH';
+      if (combined_hazard_risk >= 30) return 'MEDIUM';
+      return 'LOW';
+    }
+    return effectiveLandslideLevel;
+  };
+
+  const overallLevel = getOverallLevel();
 
   const formatTime = (mins) => {
-    if (!mins && mins !== 0) return '—';
+    if (typeof mins !== 'number' || isNaN(mins)) return '—';
     const hours = Math.floor(mins / 60);
     const remainder = Math.round(mins % 60);
     if (hours === 0) return `${remainder}m`;
@@ -58,6 +83,26 @@ export default function RouteCard({
     }
   };
 
+  const hasWaterlogging = waterlogging_risk != null;
+  const hasVehicleSuitability = typeof vehicle_suitability === 'number' && !isNaN(vehicle_suitability);
+  const hasVehicleAwareScore = typeof vehicle_aware_score === 'number' && !isNaN(vehicle_aware_score);
+  const hasAccessibilityScore = typeof accessibility_score === 'number' && !isNaN(accessibility_score);
+
+  const displayMargScore = hasVehicleAwareScore ? vehicle_aware_score : (hasAccessibilityScore ? accessibility_score : '—');
+  const activeVehicle = vehicle_type || 'Vehicle';
+
+  const getCompatibilityText = () => {
+    if (vehicle_compatible === true) return 'SUITABLE';
+    if (vehicle_compatible === false) return 'LIMITED SUITABILITY';
+    return 'Data unavailable';
+  };
+
+  const getCompatibilityPillClass = () => {
+    if (vehicle_compatible === true) return 'pill-suitable';
+    if (vehicle_compatible === false) return 'pill-limited';
+    return 'pill-unavailable';
+  };
+
   return (
     <div
       className={`card-route-item ${isSelected ? 'selected' : ''} ${isRecommended ? 'recommended' : ''}`}
@@ -67,7 +112,7 @@ export default function RouteCard({
       aria-label={`Corridor: ${route_name || route_id}`}
       onKeyDown={(e) => e.key === 'Enter' && onSelect && onSelect(route)}
     >
-      {/* Recommended Top Ribbon */}
+      {/* ── SECTION 1: Route Header ── */}
       {isRecommended && (
         <div className="card-recommended-banner">
           <IconCheck size={13} />
@@ -75,7 +120,6 @@ export default function RouteCard({
         </div>
       )}
 
-      {/* Header */}
       <div className="card-route-header">
         <div className="card-route-title-group">
           <span
@@ -91,8 +135,8 @@ export default function RouteCard({
           <h3 className="card-route-name">{route_name || `Corridor ${index + 1}`}</h3>
         </div>
 
-        <span className={`card-risk-pill ${getRiskClass(risk_level)}`}>
-          {(risk_level || 'LOW').toUpperCase()} RISK
+        <span className={`card-risk-pill ${getRiskClass(overallLevel)}`}>
+          {overallLevel} HAZARD
         </span>
       </div>
 
@@ -108,37 +152,102 @@ export default function RouteCard({
         </div>
       )}
 
-      {/* Metrics Row */}
+      {/* ── SECTION 2: Core Route Metrics (Distance, Travel Time, Environmental Risk) ── */}
       <div className="card-metrics-grid">
         <div className="card-metric-col">
           <span className="card-metric-lbl">Distance</span>
-          <span className="card-metric-val">{distance_km ?? '—'} km</span>
+          <span className="card-metric-val">{distance_km != null ? `${distance_km} km` : '—'}</span>
         </div>
         <div className="card-metric-col">
           <span className="card-metric-lbl">Travel Time</span>
           <span className="card-metric-val">{formatTime(estimated_time_min)}</span>
         </div>
         <div className="card-metric-col">
-          <span className="card-metric-lbl">Landslide Risk</span>
-          <span className="card-metric-val">{landslide_risk ?? '—'}%</span>
+          <span className="card-metric-lbl">Environmental Risk</span>
+          <span className="card-metric-val">
+            {effectiveHazardRisk != null ? `${effectiveHazardRisk}%` : '—'}
+            <span className="card-metric-sub-level"> ({overallLevel})</span>
+          </span>
         </div>
       </div>
 
-      {/* Accessibility Score Bar */}
-      <div className="card-score-section">
-        <div className="card-score-label-row">
-          <span className="card-score-title">Accessibility Score</span>
-          <span className="card-score-value">{accessibility_score ?? '—'} / 100</span>
+      {/* ── SECTION 3: Unified Route Assessment — The Only Score Section ── */}
+      <div className="card-3score-box">
+        <div className="card-3score-header">
+          <span className="card-3score-heading">ROUTE ASSESSMENT</span>
         </div>
-        <div className="card-score-track">
-          <div
-            className="card-score-progress"
-            style={{
-              width: `${Math.min(100, Math.max(0, accessibility_score ?? 0))}%`,
-              backgroundColor: isRecommended ? 'var(--forest-green)' : (accessibility_score >= 80 ? 'var(--risk-low-text)' : accessibility_score >= 60 ? 'var(--risk-medium-text)' : 'var(--risk-high-text)'),
-            }}
-          />
+
+        <div className="card-3score-grid">
+          {/* Score 1: Accessibility Assessment */}
+          <div className="score-col">
+            <span className="score-lbl">ACCESSIBILITY</span>
+            <span className="score-num">
+              {hasAccessibilityScore ? `${accessibility_score}` : '—'}
+              <span className="score-denom"> / 100</span>
+            </span>
+            <span className="score-sub">Overall Route</span>
+          </div>
+
+          <div className="score-divider" />
+
+          {/* Score 2: Vehicle Suitability */}
+          <div className="score-col">
+            <span className="score-lbl">VEHICLE</span>
+            <span className="score-num">
+              {hasVehicleSuitability ? `${vehicle_suitability}` : '—'}
+              {hasVehicleSuitability && <span className="score-denom"> / 100</span>}
+            </span>
+            <span className="score-sub">{activeVehicle} Fit</span>
+          </div>
+
+          <div className="score-divider" />
+
+          {/* Score 3: MARG Combined Score (Emphasized Final Score) */}
+          <div className="score-col score-col-final">
+            <span className="score-lbl score-lbl-final">MARG COMBINED</span>
+            <span className="score-num score-num-final">
+              {displayMargScore}
+              {displayMargScore !== '—' && <span className="score-denom"> / 100</span>}
+            </span>
+            <span className="score-sub score-sub-final">Final Score</span>
+          </div>
         </div>
+      </div>
+
+      {/* ── SECTION 4: Compact Environmental Details ── */}
+      <div className="card-env-breakdown-row">
+        <div className="env-breakdown-item">
+          <span className="env-breakdown-name">Landslide:</span>
+          <span className="env-breakdown-val">
+            {effectiveLandslideLevel} · {landslide_risk != null ? `${landslide_risk}%` : '—'}
+          </span>
+        </div>
+        <span className="env-breakdown-sep">|</span>
+        <div className="env-breakdown-item">
+          <span className="env-breakdown-name">Waterlogging:</span>
+          <span className="env-breakdown-val">
+            {hasWaterlogging
+              ? `${effectiveWaterloggingLevel || 'LOW'} · ${waterlogging_risk}%`
+              : 'Data unavailable'}
+          </span>
+        </div>
+      </div>
+
+      {/* ── SECTION 5: Compact Vehicle Context ── */}
+      <div className="card-vehicle-compact-box">
+        <div className="card-vehicle-compact-header">
+          <span className="card-vehicle-compact-title">
+            VEHICLE: <strong>{activeVehicle.toUpperCase()}</strong>
+          </span>
+          <span className={`card-vehicle-pill ${getCompatibilityPillClass()}`}>
+            {getCompatibilityText()}
+          </span>
+        </div>
+        {vehicle_reason && (
+          <div className="card-vehicle-compact-reason">
+            {vehicle_reason}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -121,20 +121,25 @@ def _sample_coords(coords: list[dict], n: int) -> list[dict]:
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def compute_average_slope_deg(coordinates: list[dict]) -> float:
+def compute_terrain_waterlogging_metrics(coordinates: list[dict]) -> dict:
     """
-    Compute the average slope (in degrees) along a route.
+    Compute terrain metrics relevant for landslide and waterlogging risk:
+      1. average_slope_deg: Mean slope in degrees across sampled segments.
+      2. flat_segments_pct: Percentage of segments where slope < 3.0 degrees.
+      3. drainage_depression_score: Metric (0-100) indicating the prevalence and depth
+         of local depressions / valley basins relative to adjacent terrain along the route.
 
     Args:
-        coordinates: List of {"lat": float, "lon": float} dicts
-                     from Person 1's route output.
+        coordinates: List of {"lat": float, "lon": float} dicts.
 
     Returns:
-        float — average slope in degrees across all valid consecutive segments.
-        Returns 0.0 if fewer than 2 sampled points produce a valid segment.
+        Dict with keys:
+          - "average_slope_deg": float
+          - "flat_segments_pct": float (0.0 to 100.0)
+          - "drainage_depression_score": float (0.0 to 100.0)
 
     Raises:
-        HTTPException(503) if the elevation dataset is unavailable.
+        HTTPException(503) if elevation dataset is unavailable.
         HTTPException(500) if coordinates are empty or malformed.
     """
     if not _ELEVATION_AVAILABLE:
@@ -149,24 +154,33 @@ def compute_average_slope_deg(coordinates: list[dict]) -> float:
     if not coordinates:
         raise HTTPException(
             status_code=500,
-            detail="Cannot compute slope: route has no coordinates.",
+            detail="Cannot compute terrain metrics: route has no coordinates.",
         )
 
-    # Sample evenly — up to MAX_ROUTE_SAMPLES points
     sampled = _sample_coords(coordinates, MAX_ROUTE_SAMPLES)
     if len(sampled) < 2:
-        log.warning("Only 1 coordinate sampled — returning slope 0.0")
-        return 0.0
+        log.warning("Only 1 coordinate sampled — returning default 0.0 terrain metrics")
+        return {
+            "average_slope_deg": 0.0,
+            "flat_segments_pct": 0.0,
+            "drainage_depression_score": 0.0,
+        }
 
+    elevations: list[float] = []
     slopes: list[float] = []
+
+    for i in range(len(sampled)):
+        pt = sampled[i]
+        elevations.append(_elevation_at(pt["lat"], pt["lon"]))
+
     for i in range(len(sampled) - 1):
         p1 = sampled[i]
         p2 = sampled[i + 1]
         lat1, lon1 = p1["lat"], p1["lon"]
         lat2, lon2 = p2["lat"], p2["lon"]
 
-        elev1 = _elevation_at(lat1, lon1)
-        elev2 = _elevation_at(lat2, lon2)
+        elev1 = elevations[i]
+        elev2 = elevations[i + 1]
 
         horiz_m = _haversine_km(lat1, lon1, lat2, lon2) * 1000.0
         if horiz_m < 1.0:
@@ -179,8 +193,73 @@ def compute_average_slope_deg(coordinates: list[dict]) -> float:
 
     if not slopes:
         log.warning("No valid slope segments computed — returning 0.0")
-        return 0.0
+        return {
+            "average_slope_deg": 0.0,
+            "flat_segments_pct": 0.0,
+            "drainage_depression_score": 0.0,
+        }
 
     avg_slope = float(np.mean(slopes))
-    log.debug("Average slope: %.2f° from %d segments", avg_slope, len(slopes))
-    return round(avg_slope, 4)
+    flat_count = sum(1 for s in slopes if s < 3.0)
+    flat_pct = (flat_count / len(slopes)) * 100.0
+
+    # Drainage / local depression calculation
+    # Evaluates relative dips in elevation between consecutive points
+    # (avoiding absolute elevation bias)
+    n_elev = len(elevations)
+    if n_elev < 3:
+        # Route is very short — baseline drainage based on flatness
+        dep_score = 20.0 if avg_slope < 3.0 else 0.0
+    else:
+        interior_count = n_elev - 2
+        dip_scores: list[float] = []
+        strict_min_count = 0
+
+        for i in range(1, n_elev - 1):
+            e_prev = elevations[i - 1]
+            e_curr = elevations[i]
+            e_next = elevations[i + 1]
+
+            e_baseline = (e_prev + e_next) / 2.0
+
+            # Strict local depression (trough lower than both neighbors)
+            if e_curr < min(e_prev, e_next):
+                strict_min_count += 1
+                dip_depth = min(e_prev - e_curr, e_next - e_curr)
+                # 20m local depression represents a substantial natural water collection basin
+                dip_score = min(100.0, (dip_depth / 20.0) * 100.0)
+            elif e_curr < e_baseline:
+                # Concave profile / valley shoulder
+                concavity = e_baseline - e_curr
+                dip_score = min(50.0, (concavity / 20.0) * 50.0)
+            else:
+                dip_score = 0.0
+
+            dip_scores.append(dip_score)
+
+        mean_dip = float(np.mean(dip_scores)) if dip_scores else 0.0
+        strict_min_pct = (strict_min_count / interior_count) * 100.0
+        raw_dep_score = 0.6 * mean_dip + 0.4 * strict_min_pct
+        dep_score = float(max(0.0, min(100.0, raw_dep_score)))
+
+    return {
+        "average_slope_deg": round(avg_slope, 4),
+        "flat_segments_pct": round(flat_pct, 2),
+        "drainage_depression_score": round(dep_score, 2),
+    }
+
+
+def compute_average_slope_deg(coordinates: list[dict]) -> float:
+    """
+    Compute the average slope (in degrees) along a route.
+    Maintained for 100% backward compatibility with existing ML pipelines.
+
+    Args:
+        coordinates: List of {"lat": float, "lon": float} dicts.
+
+    Returns:
+        float — average slope in degrees across all valid consecutive segments.
+    """
+    metrics = compute_terrain_waterlogging_metrics(coordinates)
+    return metrics["average_slope_deg"]
+

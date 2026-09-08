@@ -64,18 +64,20 @@ class RouteInput:
 
     Fields
     ------
-    route_id          : Unique identifier for the route (non-empty string).
-    distance_km       : Total route distance in kilometres. Must be >= 0.
-    estimated_time_min: Estimated travel time in minutes. Must be >= 0.
-    landslide_risk    : Landslide risk score in the range [0, 100].
-    route_name        : Optional human-readable name (not used in scoring).
-    risk_level        : Optional categorical risk label (not used in scoring).
+    route_id            : Unique identifier for the route (non-empty string).
+    distance_km         : Total route distance in kilometres. Must be >= 0.
+    estimated_time_min  : Estimated travel time in minutes. Must be >= 0.
+    landslide_risk      : Landslide risk score in the range [0, 100].
+    combined_hazard_risk: Optional multi-hazard combined risk [0, 100].
+    route_name          : Optional human-readable name (not used in scoring).
+    risk_level          : Optional categorical risk label (not used in scoring).
     """
 
     route_id: str
     distance_km: float
     estimated_time_min: float
     landslide_risk: float
+    combined_hazard_risk: Optional[float] = None
     route_name: Optional[str] = None
     risk_level: Optional[str] = None
 
@@ -107,7 +109,7 @@ class DetailedRouteScore:
     route_id           : Same as the input route_id.
     distance_score     : Normalised distance component score (0-100).
     time_score         : Normalised time component score (0-100).
-    risk_score         : Risk component score = 100 - landslide_risk.
+    risk_score         : Risk component score = 100 - hazard_risk.
     distance_weight    : Weight applied to distance_score.
     time_weight        : Weight applied to time_score.
     risk_weight        : Weight applied to risk_score.
@@ -238,7 +240,7 @@ def validate_route(route: dict, index: int) -> RouteInput:
             f"got {estimated_time_min}."
         )
 
-    # ---- landslide_risk ----------------------------------------------------
+    # ---- landslide_risk / hazard risk --------------------------------------
     if "landslide_risk" not in route or route["landslide_risk"] is None:
         raise ValidationError(
             f"Route '{route_id}': 'landslide_risk' is missing or null."
@@ -255,14 +257,21 @@ def validate_route(route: dict, index: int) -> RouteInput:
             f"got {landslide_risk}."
         )
 
+    combined_hazard_risk = None
+    if "combined_hazard_risk" in route and route["combined_hazard_risk"] is not None:
+        if not _is_invalid_float(route["combined_hazard_risk"]) and (0 <= float(route["combined_hazard_risk"]) <= 100):
+            combined_hazard_risk = float(route["combined_hazard_risk"])
+
     return RouteInput(
         route_id=route_id.strip(),
         distance_km=distance_km,
         estimated_time_min=estimated_time_min,
         landslide_risk=landslide_risk,
+        combined_hazard_risk=combined_hazard_risk,
         route_name=route.get("route_name"),
         risk_level=route.get("risk_level"),
     )
+
 
 
 def validate_routes(routes: list) -> List[RouteInput]:

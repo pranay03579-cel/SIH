@@ -103,20 +103,30 @@ export default function RouteMap({
     .map((r, idx) => ({ r, idx }))
     .find(item => item.r.route_id === recommendedId && item.r.route_id !== activeRoute?.route_id);
 
+  const getRouteColor = (idx, isRec = false, isBlocked = false) => {
+    if (isBlocked) return '#DC2626';
+    if (isRec) return '#2D5A43';
+    if (idx === 1) return '#D97706';
+    const safeIdx = Math.max(0, idx || 0);
+    return ROUTE_PALETTE[safeIdx % ROUTE_PALETTE.length]?.main || '#2563eb';
+  };
+
   const selectedItem = activeRoute
-    ? { r: activeRoute, idx: routes.findIndex(r => r.route_id === activeRoute.route_id) }
+    ? { r: activeRoute, idx: Math.max(0, routes.findIndex(r => r?.route_id === activeRoute?.route_id)) }
     : null;
 
   // Offset configuration to keep parallel/shared national highway sections clearly visible side-by-side
   const getRouteOffset = (idx, total) => {
     if (total <= 1) return { meters: 0, sign: 1 };
-    if (idx === 0) return { meters: 0, sign: 1 };     // R1 stays on baseline
-    if (idx === 1) return { meters: 45, sign: 1 };    // R2 shifted +45m
-    if (idx === 2) return { meters: 45, sign: -1 };   // R3 shifted -45m
+    const safeIdx = Math.max(0, idx || 0);
+    if (safeIdx === 0) return { meters: 0, sign: 1 };     // R1 stays on baseline
+    if (safeIdx === 1) return { meters: 45, sign: 1 };    // R2 shifted +45m
+    if (safeIdx === 2) return { meters: 45, sign: -1 };   // R3 shifted -45m
     return { meters: 80, sign: 1 };
   };
 
   const renderRoutePolylines = (route, idx, isSelected) => {
+    if (!route) return null;
     const rawCoords = normalizeCoordinates(route.coordinates);
     if (rawCoords.length === 0) return null;
 
@@ -127,11 +137,7 @@ export default function RouteMap({
     const isBlockedRoute = simState === 'landslide' && selectedRoute?.route_id === route.route_id;
 
     // Palette hierarchy: Recommended is Forest Green, alternatives are Amber, Purple, Teal, etc.
-    let color = isBlockedRoute
-      ? '#DC2626'
-      : isRecommended
-      ? '#2D5A43'
-      : (idx === 1 ? '#D97706' : ROUTE_PALETTE[idx % ROUTE_PALETTE.length].main);
+    const color = getRouteColor(idx, isRecommended, isBlockedRoute);
 
     const coreWeight = isSelected ? 8 : (isRecommended ? 6 : 5);
     const outlineWeight = isSelected ? 12 : (isRecommended ? 10 : 8);
@@ -250,11 +256,9 @@ export default function RouteMap({
         <div className="map-legend-box">
           <div className="map-legend-title">CORRIDORS</div>
           {routes.map((route, idx) => {
-            const isRec = route.route_id === recommendedId;
+            const isRec = recommendedId && route.route_id === recommendedId;
             const isSel = activeRoute?.route_id === route.route_id;
-            const color = isRec
-              ? '#2D5A43'
-              : (idx === 1 ? '#D97706' : ROUTE_PALETTE[idx % ROUTE_PALETTE.length].main);
+            const color = getRouteColor(idx, isRec, false);
 
             return (
               <div
@@ -274,10 +278,16 @@ export default function RouteMap({
                 />
                 <span>
                   <strong>{route.route_id}</strong>
-                  {isRec ? (
-                    <span className="legend-rec-tag">Recommended</span>
+                  {recommendedId ? (
+                    isRec ? (
+                      <span className="legend-rec-tag">Recommended</span>
+                    ) : (
+                      <span className="legend-alt-tag">Alternative</span>
+                    )
                   ) : (
-                    <span className="legend-alt-tag">Alternative</span>
+                    <span style={{ marginLeft: '4px', fontSize: '11px', color: '#6b716d' }}>
+                      {route.route_name || `Route ${idx + 1}`}
+                    </span>
                   )}
                 </span>
               </div>

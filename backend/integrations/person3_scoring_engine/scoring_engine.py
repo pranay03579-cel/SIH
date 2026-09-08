@@ -282,7 +282,8 @@ def score_routes(routes: list, urgency: str) -> List[RouteScore]:
             bounds["min_time"],
             bounds["max_time"],
         )
-        r_score = calculate_risk_score(route.landslide_risk)
+        hazard_val = route.combined_hazard_risk if route.combined_hazard_risk is not None else route.landslide_risk
+        r_score = calculate_risk_score(hazard_val)
 
         final_score = calculate_accessibility_score(d_score, t_score, r_score, weights)
 
@@ -358,7 +359,8 @@ def score_routes_detailed(routes: list, urgency: str) -> List[DetailedRouteScore
             bounds["min_time"],
             bounds["max_time"],
         )
-        r_score = calculate_risk_score(route.landslide_risk)
+        hazard_val = route.combined_hazard_risk if route.combined_hazard_risk is not None else route.landslide_risk
+        r_score = calculate_risk_score(hazard_val)
 
         final_score = calculate_accessibility_score(d_score, t_score, r_score, weights)
 

@@ -1238,7 +1238,7 @@ input, select, textarea {
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   padding: 8px 10px;
-  background-color: rgba(255,255,255,0.7);
+  background-color: rgba(255, 255, 255, 0.7);
   border-radius: 6px;
   border: 1px solid var(--border-subtle);
 }
@@ -1252,6 +1252,8 @@ input, select, textarea {
   font-size: 0.68rem;
   font-weight: 600;
   color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .card-metric-val {
@@ -1260,36 +1262,208 @@ input, select, textarea {
   color: var(--text-primary);
 }
 
-.card-score-section {
+.card-metric-sub-level {
+  font-size: 0.70rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* ── Section 3: Unified 3-Score Assessment System ── */
+.card-3score-box {
+  background: linear-gradient(180deg, #F9FBFA 0%, #F3F7F5 100%);
+  border: 1px solid var(--sage-accent);
+  border-radius: 8px;
+  padding: 6px 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.card-score-label-row {
+.card-3score-header {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  padding-bottom: 2px;
+}
+
+.card-3score-heading {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--forest-green);
+  text-transform: uppercase;
+}
+
+.card-3score-grid {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1.15fr;
+  align-items: center;
+  gap: 4px;
+}
+
+.score-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 3px 2px;
+}
+
+.score-divider {
+  width: 1px;
+  height: 26px;
+  background-color: rgba(45, 90, 67, 0.15);
+}
+
+.score-lbl {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.score-num {
+  font-size: 0.86rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.2;
+  margin: 1px 0;
+}
+
+.score-denom {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.score-sub {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Emphasized MARG Combined Score column */
+.score-col-final {
+  background-color: #FFFFFF;
+  border: 1px solid var(--forest-green);
+  border-radius: 6px;
+  padding: 3px 6px;
+  box-shadow: 0 1px 3px rgba(45, 90, 67, 0.08);
+}
+
+.score-lbl-final {
+  color: var(--forest-green);
+  font-weight: 800;
+}
+
+.score-num-final {
+  color: var(--forest-green);
+  font-size: 0.92rem;
+}
+
+.score-sub-final {
+  color: var(--forest-green);
+  font-weight: 700;
+  font-size: 0.60rem;
+  letter-spacing: 0.02em;
+}
+
+/* ── Section 4: Compact Environmental Details ── */
+.card-env-breakdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  background-color: var(--bg-app);
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+}
+
+.env-breakdown-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.env-breakdown-name {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.env-breakdown-val {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.env-breakdown-sep {
+  color: var(--border-subtle);
+}
+
+/* ── Section 5: Compact Vehicle Context ── */
+.card-vehicle-compact-box {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.card-vehicle-compact-header {
   display: flex;
   justify-content: space-between;
-  font-size: 0.72rem;
+  align-items: center;
+}
+
+.card-vehicle-compact-title {
+  font-size: 0.66rem;
   font-weight: 700;
+  letter-spacing: 0.03em;
   color: var(--text-secondary);
+  text-transform: uppercase;
 }
 
-.card-score-value {
-  color: var(--forest-green);
+.card-vehicle-compact-title strong {
+  color: var(--text-primary);
+  font-weight: 800;
 }
 
-.card-score-track {
-  width: 100%;
-  height: 6px;
-  background-color: rgba(0,0,0,0.06);
-  border-radius: 3px;
-  overflow: hidden;
+.card-vehicle-pill {
+  font-size: 0.64rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
 }
 
-.card-score-progress {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.3s ease;
+.card-vehicle-pill.pill-suitable {
+  background-color: var(--risk-low-bg);
+  color: var(--risk-low-text);
+  border: 1px solid var(--risk-low-border);
+}
+
+.card-vehicle-pill.pill-limited {
+  background-color: var(--risk-medium-bg);
+  color: var(--risk-medium-text);
+  border: 1px solid var(--risk-medium-border);
+}
+
+.card-vehicle-pill.pill-unavailable {
+  background-color: var(--bg-card);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+.card-vehicle-compact-reason {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  line-height: 1.3;
 }
 
 .analyse-corridors-btn {
@@ -2778,3 +2952,154 @@ input, select, textarea {
     flex-direction: column;
   }
 }
+
+/* ==========================================================================
+   MULTI-HAZARD ENVIRONMENTAL RISK & WATERLOGGING FACTORS STYLES
+   ========================================================================== */
+
+/* ── Environmental Hazard Summary in Route Cards ── */
+.card-env-hazard-box {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card-env-hazard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-env-hazard-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.card-env-hazard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.card-hazard-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+}
+
+.card-hazard-name {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.card-hazard-level {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.card-hazard-num {
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-left: auto;
+}
+
+.card-hazard-muted {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-left: auto;
+}
+
+/* ── Multi-Hazard Risk Intelligence Triplet Grid ── */
+.risk-cards-triplet-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .risk-cards-triplet-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.combined-hazard-card {
+  border-color: rgba(45, 90, 67, 0.3);
+  background: linear-gradient(180deg, #FFFFFF 0%, #F5F9F6 100%);
+}
+
+/* ── Waterlogging Susceptibility Factors ── */
+.factors-card {
+  background-color: var(--bg-card);
+}
+
+.factors-progress-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 24px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+@media (max-width: 768px) {
+  .factors-progress-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.factor-metric-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.factor-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.factor-title {
+  color: var(--text-primary);
+}
+
+.factor-weight-tag {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  background-color: var(--bg-app);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.factor-value {
+  margin-left: auto;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.factor-track {
+  width: 100%;
+  height: 6px;
+  background-color: var(--bg-app);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.factor-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+

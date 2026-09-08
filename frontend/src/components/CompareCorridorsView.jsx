@@ -38,7 +38,11 @@ export default function CompareCorridorsView({
       label: 'Distance',
       key: 'distance_km',
       fmt: (val) => (val != null ? `${val} km` : '—'),
-      isBest: (val, all) => val === Math.min(...all.map(r => r.distance_km ?? Infinity)),
+      isBest: (val, all) => {
+        if (typeof val !== 'number') return false;
+        const valid = all.map(r => r?.distance_km).filter(v => typeof v === 'number');
+        return valid.length > 0 && val === Math.min(...valid);
+      },
       isKey: true
     },
     {
@@ -46,31 +50,120 @@ export default function CompareCorridorsView({
       label: 'Travel Time',
       key: 'estimated_time_min',
       fmt: (val) => fmtTime(val),
-      isBest: (val, all) => val === Math.min(...all.map(r => r.estimated_time_min ?? Infinity)),
-      isKey: true
-    },
-    {
-      id: 'risk',
-      label: 'Landslide Risk',
-      key: 'landslide_risk',
-      fmt: (val, r) => `${val ?? '—'}% (${(r.risk_level || 'LOW').toUpperCase()})`,
-      isBest: (val, all) => val === Math.min(...all.map(r => r.landslide_risk ?? Infinity)),
+      isBest: (val, all) => {
+        if (typeof val !== 'number') return false;
+        const valid = all.map(r => r?.estimated_time_min).filter(v => typeof v === 'number');
+        return valid.length > 0 && val === Math.min(...valid);
+      },
       isKey: true
     },
     {
       id: 'score',
-      label: 'Accessibility Score',
+      label: 'Accessibility Assessment',
       key: 'accessibility_score',
-      fmt: (val) => `${val ?? '—'} / 100`,
-      isBest: (val, all) => val === Math.max(...all.map(r => r.accessibility_score ?? -Infinity)),
+      fmt: (val) => (val != null ? `${val} / 100` : '—'),
+      isBest: (val, all) => {
+        if (typeof val !== 'number') return false;
+        const valid = all.map(r => r?.accessibility_score).filter(v => typeof v === 'number');
+        return valid.length > 0 && val === Math.max(...valid);
+      },
       isKey: true
+    },
+    {
+      id: 'vehicle_type',
+      label: 'Vehicle Type',
+      key: 'vehicle_type',
+      fmt: (val, r) => r?.vehicle_type || '—',
+      isBest: () => false,
+      isKey: true
+    },
+    {
+      id: 'vehicle_suitability',
+      label: 'Vehicle Suitability',
+      key: 'vehicle_suitability',
+      fmt: (val) => (typeof val === 'number' ? `${val} / 100` : 'Data unavailable'),
+      isBest: (val, all) => {
+        if (typeof val !== 'number') return false;
+        const valid = all.map(r => r?.vehicle_suitability).filter(v => typeof v === 'number');
+        return valid.length > 0 && val === Math.max(...valid);
+      },
+      isKey: true
+    },
+    {
+      id: 'vehicle_compatible',
+      label: 'Vehicle Compatibility',
+      key: 'vehicle_compatible',
+      fmt: (val, r) => (r?.vehicle_compatible === true ? 'Suitable' : (r?.vehicle_compatible === false ? 'Limited' : 'Data unavailable')),
+      isBest: (val, all, r) => r?.vehicle_compatible === true,
+      isKey: true
+    },
+    {
+      id: 'vehicle_aware_score',
+      label: 'MARG Combined Score',
+      key: 'vehicle_aware_score',
+      fmt: (val) => (typeof val === 'number' ? `${val} / 100` : 'Data unavailable'),
+      isBest: (val, all) => {
+        if (typeof val !== 'number') return false;
+        const valid = all.map(r => r?.vehicle_aware_score).filter(v => typeof v === 'number');
+        return valid.length > 0 && val === Math.max(...valid);
+      },
+      isKey: true
+    },
+    {
+      id: 'combined_hazard',
+      label: 'Environmental Risk',
+      key: 'combined_hazard_risk',
+      fmt: (val, r) => {
+        const hazardVal = val != null ? val : r?.landslide_risk;
+        const lvl = (val != null ? (val >= 60 ? 'HIGH' : val >= 30 ? 'MEDIUM' : 'LOW') : (r?.landslide_risk_level || r?.risk_level || 'LOW')).toUpperCase();
+        return `${hazardVal ?? '—'}% (${lvl})`;
+      },
+      isBest: (val, all, r) => {
+        const hVal = typeof val === 'number' ? val : (typeof r?.landslide_risk === 'number' ? r.landslide_risk : null);
+        if (hVal === null) return false;
+        const allHazards = all.map(route => typeof route?.combined_hazard_risk === 'number' ? route.combined_hazard_risk : (typeof route?.landslide_risk === 'number' ? route.landslide_risk : null)).filter(v => v !== null);
+        return allHazards.length > 0 && hVal === Math.min(...allHazards);
+      },
+      isKey: true
+    },
+    {
+      id: 'landslide_risk',
+      label: 'Landslide Risk',
+      key: 'landslide_risk',
+      fmt: (val, r) => `${val ?? '—'}% (${(r?.landslide_risk_level || r?.risk_level || 'LOW').toUpperCase()})`,
+      isBest: (val, all) => {
+        if (typeof val !== 'number') return false;
+        const valid = all.map(r => r?.landslide_risk).filter(v => typeof v === 'number');
+        return valid.length > 0 && val === Math.min(...valid);
+      },
+      isKey: false
+    },
+    {
+      id: 'waterlogging_risk',
+      label: 'Waterlogging Risk',
+      key: 'waterlogging_risk',
+      fmt: (val, r) => {
+        if (val == null) return 'Data unavailable';
+        const lvl = r?.waterlogging_level || (val >= 60 ? 'HIGH' : val >= 30 ? 'MEDIUM' : 'LOW');
+        return `${val}% (${lvl.toUpperCase()})`;
+      },
+      isBest: (val, all) => {
+        if (typeof val !== 'number') return false;
+        const allWl = all.map(r => r?.waterlogging_risk).filter(v => typeof v === 'number');
+        return allWl.length > 0 && val === Math.min(...allWl);
+      },
+      isKey: false
     },
     {
       id: 'dist_score',
       label: 'Distance Score Component',
       key: 'distance_score',
       fmt: (val) => (val != null ? `${val} pts` : '—'),
-      isBest: (val, all) => val === Math.max(...all.map(r => r.distance_score ?? -Infinity)),
+      isBest: (val, all) => {
+        if (typeof val !== 'number') return false;
+        const valid = all.map(r => r?.distance_score).filter(v => typeof v === 'number');
+        return valid.length > 0 && val === Math.max(...valid);
+      },
       isKey: false
     },
     {
@@ -78,15 +171,23 @@ export default function CompareCorridorsView({
       label: 'Time Score Component',
       key: 'time_score',
       fmt: (val) => (val != null ? `${val} pts` : '—'),
-      isBest: (val, all) => val === Math.max(...all.map(r => r.time_score ?? -Infinity)),
+      isBest: (val, all) => {
+        if (typeof val !== 'number') return false;
+        const valid = all.map(r => r?.time_score).filter(v => typeof v === 'number');
+        return valid.length > 0 && val === Math.max(...valid);
+      },
       isKey: false
     },
     {
       id: 'risk_score',
-      label: 'Safety Score Component',
+      label: 'Environmental Safety Component',
       key: 'risk_score',
       fmt: (val) => (val != null ? `${val} pts` : '—'),
-      isBest: (val, all) => val === Math.max(...all.map(r => r.risk_score ?? -Infinity)),
+      isBest: (val, all) => {
+        if (typeof val !== 'number') return false;
+        const valid = all.map(r => r?.risk_score).filter(v => typeof v === 'number');
+        return valid.length > 0 && val === Math.max(...valid);
+      },
       isKey: false
     },
   ];
@@ -164,7 +265,7 @@ export default function CompareCorridorsView({
                     <td className="compare-td-label">{m.label}</td>
                     {routes.map((r) => {
                       const val = r[m.key];
-                      const isBest = m.isBest(val, routes);
+                      const isBest = m.isBest(val, routes, r);
                       const isRec = r.route_id === recommendedId;
                       return (
                         <td
@@ -200,15 +301,25 @@ export default function CompareCorridorsView({
             <ul className="compare-verdict-bullets">
               <li>
                 <span className="verdict-bullet-icon"><IconCheck size={14} /></span>
-                <span>Highest accessibility index: <strong>{winner.accessibility_score} / 100</strong></span>
+                <span>
+                  {typeof winner.vehicle_aware_score === 'number'
+                    ? <>Top MARG Combined Score: <strong>{winner.vehicle_aware_score} / 100</strong></>
+                    : <>Accessibility Assessment: <strong>{winner.accessibility_score} / 100</strong></>}
+                </span>
+              </li>
+              {typeof winner.vehicle_suitability === 'number' && (
+                <li>
+                  <span className="verdict-bullet-icon"><IconCheck size={14} /></span>
+                  <span>Vehicle Suitability for {winner.vehicle_type || 'selected vehicle'}: <strong>{winner.vehicle_suitability} / 100</strong></span>
+                </li>
+              )}
+              <li>
+                <span className="verdict-bullet-icon"><IconCheck size={14} /></span>
+                <span>Environmental Risk: <strong>{winner.combined_hazard_risk != null ? `${winner.combined_hazard_risk}%` : `${winner.landslide_risk}%`}</strong></span>
               </li>
               <li>
                 <span className="verdict-bullet-icon"><IconCheck size={14} /></span>
-                <span>Terrain risk profile: <strong>{winner.landslide_risk}% ({winner.risk_level})</strong></span>
-              </li>
-              <li>
-                <span className="verdict-bullet-icon"><IconCheck size={14} /></span>
-                <span>Estimated journey: <strong>{fmtTime(winner.estimated_time_min)} ({winner.distance_km} km)</strong></span>
+                <span>Estimated Journey: <strong>{fmtTime(winner.estimated_time_min)} ({winner.distance_km} km)</strong></span>
               </li>
             </ul>
 

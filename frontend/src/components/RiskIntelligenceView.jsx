@@ -3,6 +3,8 @@ import {
   IconAlertTriangle,
   IconShieldCheck,
   IconShieldAlert,
+  IconDroplet,
+  IconLayers,
   IconInfo
 } from './Icons';
 
@@ -25,11 +27,27 @@ export default function RiskIntelligenceView({
     );
   }
 
-  const riskLevel = (route.risk_level || 'LOW').toUpperCase();
-  const riskPct = route.landslide_risk ?? 0;
+  const landslideLevel = (route.landslide_risk_level || route.risk_level || 'LOW').toUpperCase();
+  const landslidePct = typeof route.landslide_risk === 'number' ? route.landslide_risk : null;
+
+  const hasWaterlogging = typeof route.waterlogging_risk === 'number';
+  const waterloggingPct = hasWaterlogging ? route.waterlogging_risk : null;
+  const waterloggingLevel = route.waterlogging_level
+    ? route.waterlogging_level.toUpperCase()
+    : (hasWaterlogging ? (waterloggingPct >= 60 ? 'HIGH' : waterloggingPct >= 30 ? 'MEDIUM' : 'LOW') : null);
+
+  const combinedPct = typeof route.combined_hazard_risk === 'number'
+    ? route.combined_hazard_risk
+    : (landslidePct !== null ? landslidePct : null);
+  const combinedLevel = combinedPct !== null
+    ? (combinedPct >= 60 ? 'HIGH' : combinedPct >= 30 ? 'MEDIUM' : 'LOW')
+    : landslideLevel;
+
+  const factors = route?.waterlogging_factors;
+  const hasFactors = factors && typeof factors === 'object' && Object.keys(factors).length > 0;
 
   const getRiskBg = (lvl) => {
-    switch (lvl) {
+    switch ((lvl || '').toUpperCase()) {
       case 'LOW': return 'var(--risk-low-bg)';
       case 'MEDIUM': return 'var(--risk-medium-bg)';
       case 'HIGH':
@@ -39,7 +57,7 @@ export default function RiskIntelligenceView({
   };
 
   const getRiskColor = (lvl) => {
-    switch (lvl) {
+    switch ((lvl || '').toUpperCase()) {
       case 'LOW': return 'var(--risk-low-text)';
       case 'MEDIUM': return 'var(--risk-medium-text)';
       case 'HIGH':
@@ -54,13 +72,17 @@ export default function RiskIntelligenceView({
 
   // Simple, factual risk summary based strictly on backend values
   const getRiskSummary = () => {
-    if (riskLevel === 'LOW') {
-      return `This corridor is evaluated at ${riskPct}% landslide risk (${riskLevel} RISK). The ML model predicts low probability of slope failure or obstruction along this route.`;
+    const hazardStr = combinedPct !== null ? `${combinedPct}%` : 'unrated';
+    let text = `Corridor [${route.route_id || 'R1'}] is evaluated at ${hazardStr} combined environmental hazard (${combinedLevel} HAZARD). `;
+    text += `Landslide susceptibility is ${landslidePct !== null ? `${landslidePct}%` : 'Data unavailable'} (${landslideLevel}), and waterlogging susceptibility is ${hasWaterlogging ? `${waterloggingPct}% (${waterloggingLevel || '—'})` : 'Data unavailable'}. `;
+    if (combinedLevel === 'LOW') {
+      text += 'Low probability of slope failure or drainage accumulation along this corridor.';
+    } else if (combinedLevel === 'MEDIUM') {
+      text += 'Moderate environmental exposure detected. Standard operational transit monitoring is advised.';
+    } else {
+      text += 'Elevated environmental exposure detected. Active corridor caution or emergency alternative consideration is recommended.';
     }
-    if (riskLevel === 'MEDIUM') {
-      return `This corridor is evaluated at ${riskPct}% landslide risk (${riskLevel} RISK). Moderate landslide risk detected along the route. Standard operational monitoring is advised.`;
-    }
-    return `This corridor is evaluated at ${riskPct}% landslide risk (${riskLevel} RISK). Elevated risk detected by the ML model. Caution or alternative route selection is recommended.`;
+    return text;
   };
 
   return (
@@ -69,9 +91,9 @@ export default function RiskIntelligenceView({
       <div className="section-header-row">
         <div>
           <div className="section-stepper-label">07 RISK INTELLIGENCE</div>
-          <h2 className="section-heading-title">Landslide Risk Assessment</h2>
+          <h2 className="section-heading-title">Multi-Hazard Environmental Assessment</h2>
           <p className="section-heading-sub">
-            Machine-learning risk evaluation based on the active corridor.
+            Composite environmental risk evaluation considering terrain stability and precipitation pressure.
           </p>
         </div>
 
@@ -96,63 +118,219 @@ export default function RiskIntelligenceView({
         )}
       </div>
 
-      {/* ── 2-3 MINIMAL CARDS BASED STRICTLY ON REAL BACKEND DATA ── */}
-
-      {/* CARD 1: Overall ML Landslide Risk */}
-      <div className="minimal-risk-card">
-        <div className="minimal-card-header">
-          <div className="minimal-card-title-group">
-            <div
-              className="minimal-risk-icon-wrap"
-              style={{ color: getRiskColor(riskLevel), backgroundColor: getRiskBg(riskLevel) }}
-            >
-              {riskLevel === 'HIGH' ? <IconShieldAlert size={20} /> : <IconShieldCheck size={20} />}
-            </div>
-            <div>
-              <h3 className="minimal-card-title">Overall Landslide Risk</h3>
-              <span className="minimal-card-source">Random Forest ML Risk Model</span>
-            </div>
-          </div>
-          <span
-            className="risk-level-hero-badge"
-            style={{ backgroundColor: getRiskBg(riskLevel), color: getRiskColor(riskLevel) }}
-          >
-            <span className="status-indicator-dot" style={{ backgroundColor: getRiskColor(riskLevel) }} />
-            {riskLevel} RISK
-          </span>
-        </div>
-
-        <div className="minimal-risk-metrics-row">
-          <div className="minimal-metric-block">
-            <span className="minimal-metric-label">Predicted Landslide Risk</span>
-            <div className="minimal-metric-value-row">
-              <span className="minimal-metric-num" style={{ color: getRiskColor(riskLevel) }}>
-                {riskPct}%
-              </span>
-            </div>
-          </div>
-
-          <div className="minimal-metric-block">
-            <span className="minimal-metric-label">Corridor Identifier</span>
-            <div className="minimal-metric-value-row">
-              <span className="minimal-metric-num-neutral">[{route.route_id}]</span>
-              <span className="minimal-metric-sub">{route.route_name || 'Corridor'}</span>
-            </div>
-          </div>
-
-          {route.risk_score != null && (
-            <div className="minimal-metric-block">
-              <span className="minimal-metric-label">Scoring Engine Risk Factor</span>
-              <div className="minimal-metric-value-row">
-                <span className="minimal-metric-num-neutral">{route.risk_score}</span>
-                <span className="minimal-metric-sub">/ 100</span>
+      {/* ── 3 PRIMARY RISK CARDS ── */}
+      <div className="risk-cards-triplet-grid">
+        {/* CARD 1: Landslide Risk */}
+        <div className="minimal-risk-card">
+          <div className="minimal-card-header">
+            <div className="minimal-card-title-group">
+              <div
+                className="minimal-risk-icon-wrap"
+                style={{ color: getRiskColor(landslideLevel), backgroundColor: getRiskBg(landslideLevel) }}
+              >
+                {landslideLevel === 'HIGH' ? <IconShieldAlert size={20} /> : <IconShieldCheck size={20} />}
+              </div>
+              <div>
+                <h3 className="minimal-card-title">Landslide Risk</h3>
+                <span className="minimal-card-source">Random Forest ML Risk Model</span>
               </div>
             </div>
-          )}
+            <span
+              className="risk-level-hero-badge"
+              style={{ backgroundColor: getRiskBg(landslideLevel), color: getRiskColor(landslideLevel) }}
+            >
+              <span className="status-indicator-dot" style={{ backgroundColor: getRiskColor(landslideLevel) }} />
+              {landslideLevel}
+            </span>
+          </div>
+
+          <div className="minimal-risk-metrics-row">
+            <div className="minimal-metric-block">
+              <span className="minimal-metric-label">Landslide Probability</span>
+              <div className="minimal-metric-value-row">
+                <span className="minimal-metric-num" style={{ color: getRiskColor(landslideLevel) }}>
+                  {landslidePct}%
+                </span>
+              </div>
+            </div>
+            <div className="minimal-metric-block">
+              <span className="minimal-metric-label">Vulnerability Level</span>
+              <div className="minimal-metric-value-row">
+                <span className="minimal-metric-num-neutral">{landslideLevel}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* CARD 2: Waterlogging Risk */}
+        <div className="minimal-risk-card">
+          <div className="minimal-card-header">
+            <div className="minimal-card-title-group">
+              <div
+                className="minimal-risk-icon-wrap"
+                style={{ color: getRiskColor(waterloggingLevel), backgroundColor: getRiskBg(waterloggingLevel) }}
+              >
+                <IconDroplet size={20} />
+              </div>
+              <div>
+                <h3 className="minimal-card-title">Waterlogging Risk</h3>
+                <span className="minimal-card-source">Terrain &amp; Precipitation Susceptibility</span>
+              </div>
+            </div>
+            {hasWaterlogging && waterloggingLevel ? (
+              <span
+                className="risk-level-hero-badge"
+                style={{ backgroundColor: getRiskBg(waterloggingLevel), color: getRiskColor(waterloggingLevel) }}
+              >
+                <span className="status-indicator-dot" style={{ backgroundColor: getRiskColor(waterloggingLevel) }} />
+                {waterloggingLevel}
+              </span>
+            ) : (
+              <span className="risk-level-hero-badge" style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-muted)' }}>
+                Data unavailable
+              </span>
+            )}
+          </div>
+
+          <div className="minimal-risk-metrics-row">
+            <div className="minimal-metric-block">
+              <span className="minimal-metric-label">Waterlogging Index</span>
+              <div className="minimal-metric-value-row">
+                <span className="minimal-metric-num" style={{ color: hasWaterlogging && waterloggingLevel ? getRiskColor(waterloggingLevel) : 'var(--text-secondary)' }}>
+                  {hasWaterlogging ? `${waterloggingPct}%` : 'Data unavailable'}
+                </span>
+              </div>
+            </div>
+            <div className="minimal-metric-block">
+              <span className="minimal-metric-label">Susceptibility Level</span>
+              <div className="minimal-metric-value-row">
+                <span className="minimal-metric-num-neutral">{hasWaterlogging ? (waterloggingLevel || '—') : 'Data unavailable'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* CARD 3: Combined Multi-Hazard Risk */}
+        <div className="minimal-risk-card combined-hazard-card">
+          <div className="minimal-card-header">
+            <div className="minimal-card-title-group">
+              <div
+                className="minimal-risk-icon-wrap"
+                style={{ color: getRiskColor(combinedLevel), backgroundColor: getRiskBg(combinedLevel) }}
+              >
+                <IconLayers size={20} />
+              </div>
+              <div>
+                <h3 className="minimal-card-title">Combined Hazard Risk</h3>
+                <span className="minimal-card-source">Multi-Hazard Probabilistic Exposure</span>
+              </div>
+            </div>
+            <span
+              className="risk-level-hero-badge"
+              style={{ backgroundColor: getRiskBg(combinedLevel), color: getRiskColor(combinedLevel) }}
+            >
+              <span className="status-indicator-dot" style={{ backgroundColor: getRiskColor(combinedLevel) }} />
+              {combinedLevel}
+            </span>
+          </div>
+
+          <div className="minimal-risk-metrics-row">
+            <div className="minimal-metric-block">
+              <span className="minimal-metric-label">Overall Environmental Exposure</span>
+              <div className="minimal-metric-value-row">
+                <span className="minimal-metric-num" style={{ color: getRiskColor(combinedLevel) }}>
+                  {combinedPct}%
+                </span>
+              </div>
+            </div>
+            <div className="minimal-metric-block">
+              <span className="minimal-metric-label">Hazard Profile</span>
+              <div className="minimal-metric-value-row">
+                <span className="minimal-metric-sub" style={{ fontSize: '0.78rem', lineHeight: '1.3' }}>
+                  Combined environmental exposure considering both landslide and waterlogging susceptibility.
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* CARD 2: Corridor Metrics & Terrain (Only Real Backend Data) */}
+      {/* ── WATERLOGGING SUSCEPTIBILITY FACTORS (PART 5) ── */}
+      {hasFactors && (
+        <div className="minimal-risk-card factors-card">
+          <div className="minimal-card-header">
+            <div className="minimal-card-title-group">
+              <div className="minimal-risk-icon-wrap" style={{ color: 'var(--forest-green)', backgroundColor: 'var(--sage-light)' }}>
+                <IconDroplet size={20} />
+              </div>
+              <div>
+                <h3 className="minimal-card-title">Waterlogging Susceptibility Factors</h3>
+                <span className="minimal-card-source">Environmental components contributing to waterlogging risk</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="factors-progress-grid">
+            <div className="factor-metric-row">
+              <div className="factor-header-row">
+                <span className="factor-title">Rainfall Pressure (24h)</span>
+                <span className="factor-weight-tag">Weight 45%</span>
+                <span className="factor-value">{factors.rainfall_pressure ?? 0}%</span>
+              </div>
+              <div className="factor-track">
+                <div
+                  className="factor-fill"
+                  style={{ width: `${Math.min(100, Math.max(0, factors.rainfall_pressure ?? 0))}%`, backgroundColor: 'var(--pale-blue-dark)' }}
+                />
+              </div>
+            </div>
+
+            <div className="factor-metric-row">
+              <div className="factor-header-row">
+                <span className="factor-title">Flat Terrain Exposure</span>
+                <span className="factor-weight-tag">Weight 30%</span>
+                <span className="factor-value">{factors.flat_terrain ?? 0}%</span>
+              </div>
+              <div className="factor-track">
+                <div
+                  className="factor-fill"
+                  style={{ width: `${Math.min(100, Math.max(0, factors.flat_terrain ?? 0))}%`, backgroundColor: 'var(--soft-peach-dark)' }}
+                />
+              </div>
+            </div>
+
+            <div className="factor-metric-row">
+              <div className="factor-header-row">
+                <span className="factor-title">Drainage Susceptibility</span>
+                <span className="factor-weight-tag">Weight 15%</span>
+                <span className="factor-value">{factors.drainage_susceptibility ?? 0}%</span>
+              </div>
+              <div className="factor-track">
+                <div
+                  className="factor-fill"
+                  style={{ width: `${Math.min(100, Math.max(0, factors.drainage_susceptibility ?? 0))}%`, backgroundColor: 'var(--dusty-lavender-dark)' }}
+                />
+              </div>
+            </div>
+
+            <div className="factor-metric-row">
+              <div className="factor-header-row">
+                <span className="factor-title">Rainfall Saturation (7d)</span>
+                <span className="factor-weight-tag">Weight 10%</span>
+                <span className="factor-value">{factors.rainfall_saturation ?? 0}%</span>
+              </div>
+              <div className="factor-track">
+                <div
+                  className="factor-fill"
+                  style={{ width: `${Math.min(100, Math.max(0, factors.rainfall_saturation ?? 0))}%`, backgroundColor: 'var(--forest-green)' }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CARD: Corridor Transit & Slope ── */}
       <div className="minimal-risk-card">
         <div className="minimal-card-header">
           <div className="minimal-card-title-group">
@@ -160,8 +338,8 @@ export default function RiskIntelligenceView({
               <IconInfo size={20} />
             </div>
             <div>
-              <h3 className="minimal-card-title">Route Corridor Metrics</h3>
-              <span className="minimal-card-source">OSRM Routing &amp; Transit Engine</span>
+              <h3 className="minimal-card-title">Route Corridor Parameters</h3>
+              <span className="minimal-card-source">GIS Geometry &amp; Topographic Baseline</span>
             </div>
           </div>
         </div>
@@ -178,14 +356,14 @@ export default function RiskIntelligenceView({
           <div className="minimal-metric-block">
             <span className="minimal-metric-label">Estimated Transit Time</span>
             <div className="minimal-metric-value-row">
-              <span className="minimal-metric-num-neutral">{Math.round(route.estimated_time_min)}</span>
+              <span className="minimal-metric-num-neutral">{typeof route.estimated_time_min === 'number' ? Math.round(route.estimated_time_min) : (route.estimated_time_min ?? '—')}</span>
               <span className="minimal-metric-sub">min</span>
             </div>
           </div>
 
           {hasRealSlope && (
             <div className="minimal-metric-block">
-              <span className="minimal-metric-label">Terrain Slope</span>
+              <span className="minimal-metric-label">Mean Terrain Slope</span>
               <div className="minimal-metric-value-row">
                 <span className="minimal-metric-num-neutral">{slopeVal}°</span>
                 <span className="minimal-metric-sub">Incline</span>
@@ -194,30 +372,37 @@ export default function RiskIntelligenceView({
           )}
 
           <div className="minimal-metric-block">
-            <span className="minimal-metric-label">Route Origin → Destination</span>
+            <span className="minimal-metric-label">Selected Vehicle</span>
             <div className="minimal-metric-value-row">
-              <span className="minimal-metric-sub" style={{ fontWeight: 600 }}>
-                {route.origin || 'Origin'} → {route.destination || 'Destination'}
-              </span>
+              <span className="minimal-metric-num-neutral">{route.vehicle_type || 'CAR'}</span>
+              <span className="minimal-metric-sub">Profile</span>
+            </div>
+          </div>
+
+          <div className="minimal-metric-block">
+            <span className="minimal-metric-label">Corridor Identifier</span>
+            <div className="minimal-metric-value-row">
+              <span className="minimal-metric-num-neutral">[{route.route_id}]</span>
+              <span className="minimal-metric-sub">{route.route_name || 'Corridor'}</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* CARD 3: Simple Risk Summary */}
+      {/* ── CARD: Dynamic Risk Summary ── */}
       <div
         className="minimal-risk-summary-card"
         style={{
-          backgroundColor: getRiskBg(riskLevel),
-          borderColor: riskLevel === 'HIGH' ? '#DC2626' : riskLevel === 'MEDIUM' ? '#D97706' : 'rgba(45, 90, 67, 0.2)'
+          backgroundColor: getRiskBg(combinedLevel),
+          borderColor: combinedLevel === 'HIGH' ? '#DC2626' : combinedLevel === 'MEDIUM' ? '#D97706' : 'rgba(45, 90, 67, 0.2)'
         }}
       >
         <div className="minimal-summary-header">
-          <span className="minimal-summary-tag" style={{ color: getRiskColor(riskLevel) }}>
-            RISK SUMMARY
+          <span className="minimal-summary-tag" style={{ color: getRiskColor(combinedLevel) }}>
+            ENVIRONMENTAL RISK SUMMARY
           </span>
-          <span className="minimal-summary-status" style={{ color: getRiskColor(riskLevel) }}>
-            Status: <strong>{riskLevel} RISK</strong>
+          <span className="minimal-summary-status" style={{ color: getRiskColor(combinedLevel) }}>
+            Status: <strong>{combinedLevel} HAZARD</strong>
           </span>
         </div>
         <p className="minimal-summary-text">{getRiskSummary()}</p>
@@ -225,3 +410,4 @@ export default function RiskIntelligenceView({
     </div>
   );
 }
+

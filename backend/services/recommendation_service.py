@@ -8,6 +8,7 @@ This is Person 4's core logic — no teammates need to touch this file.
 """
 
 import copy
+from typing import Optional
 from fastapi import HTTPException
 
 
@@ -63,8 +64,15 @@ def merge_pipeline_data(
                     f"missing or None. Missing risk is NOT treated as 0."
                 ),
             )
-        combined["landslide_risk"] = landslide_risk
-        combined["risk_level"]     = risk.get("risk_level")
+        combined["landslide_risk"]       = landslide_risk
+        combined["risk_level"]           = risk.get("risk_level")
+        combined["landslide_risk_level"] = risk.get("landslide_risk_level", risk.get("risk_level"))
+        combined["waterlogging_risk"]    = risk.get("waterlogging_risk")
+        combined["waterlogging_level"]   = risk.get("waterlogging_level")
+        combined["waterlogging_factors"] = risk.get("waterlogging_factors")
+        combined["combined_hazard_risk"] = risk.get("combined_hazard_risk", landslide_risk)
+        combined["average_slope_deg"]    = risk.get("average_slope_deg")
+        combined["slope_deg"]            = risk.get("slope_deg")
 
         # Attach accessibility score — missing score is an explicit error (ISSUE 2)
         if rid not in score_map:
@@ -87,21 +95,31 @@ def merge_pipeline_data(
     return merged
 
 
-def rank_and_recommend(unified_routes: list[dict]) -> list[dict]:
+def rank_and_recommend(unified_routes: list[dict], vehicle_type: Optional[str] = None) -> list[dict]:
     """
-    Sort routes by accessibility_score (descending) and mark exactly ONE
-    route as recommended=True.
+    Rank candidate routes and mark exactly ONE route as recommended=True.
 
-    The recommended route is always the one with the highest accessibility_score.
-    This is recalculated fresh on every request — never read from stored data.
+    If vehicle_type is provided:
+        Applies Vehicle-Aware Recommendation Layer:
+            VehicleAwareScore = 0.8 * AccessibilityScore + 0.2 * VehicleSuitability
+        Prioritizes vehicle-compatible routes and marks the top vehicle-aware route
+        as recommended=True.
+
+    If vehicle_type is None:
+        Preserves legacy behavior sorting by accessibility_score descending.
 
     Args:
         unified_routes: Output of merge_pipeline_data()
+        vehicle_type: Optional vehicle type string (e.g. 'CAR', 'TRUCK')
 
     Returns:
         Sorted list of route dicts with recommended field set correctly.
         Exactly one route will have recommended=True.
     """
+    if vehicle_type:
+        from services.vehicle_service import apply_vehicle_evaluation
+        return apply_vehicle_evaluation(unified_routes, vehicle_type)
+
     ranked = copy.deepcopy(unified_routes)
     ranked.sort(key=lambda r: r.get("accessibility_score", 0.0), reverse=True)
 

@@ -15,19 +15,29 @@ import DemoControlButton from './components/DemoControlButton';
 import EmergencyRoutePanel from './components/EmergencyRoutePanel';
 import { IconMap, IconBarChart } from './components/Icons';
 
+// API Base Configuration
+const API_BASE_URL = '';
+
 // Helper to compute comparative badges across routes
 const getComparisonTags = (route, allRoutes) => {
-  if (!allRoutes || allRoutes.length <= 1) return [];
+  if (!route || !allRoutes || allRoutes.length <= 1) return [];
   const tags = [];
-  const minDist = Math.min(...allRoutes.map(r => r.distance_km ?? Infinity));
-  const minTime = Math.min(...allRoutes.map(r => r.estimated_time_min ?? Infinity));
-  const minRisk = Math.min(...allRoutes.map(r => r.landslide_risk ?? Infinity));
-  const maxScore = Math.max(...allRoutes.map(r => r.accessibility_score ?? -Infinity));
+  const validDistances = allRoutes.map(r => r?.distance_km).filter(v => typeof v === 'number');
+  const validTimes = allRoutes.map(r => r?.estimated_time_min).filter(v => typeof v === 'number');
+  const validRisks = allRoutes.map(r => (typeof r?.combined_hazard_risk === 'number' ? r.combined_hazard_risk : r?.landslide_risk)).filter(v => typeof v === 'number');
+  const validScores = allRoutes.map(r => r?.accessibility_score).filter(v => typeof v === 'number');
 
-  if (route.distance_km === minDist) tags.push({ label: 'Shortest', type: 'distance' });
-  if (route.estimated_time_min === minTime) tags.push({ label: 'Fastest', type: 'time' });
-  if (route.landslide_risk === minRisk) tags.push({ label: 'Safest', type: 'risk' });
-  if (route.accessibility_score === maxScore) tags.push({ label: 'Top Score', type: 'score' });
+  const minDist = validDistances.length > 0 ? Math.min(...validDistances) : Infinity;
+  const minTime = validTimes.length > 0 ? Math.min(...validTimes) : Infinity;
+  const minRisk = validRisks.length > 0 ? Math.min(...validRisks) : Infinity;
+  const maxScore = validScores.length > 0 ? Math.max(...validScores) : -Infinity;
+
+  const currentRisk = typeof route.combined_hazard_risk === 'number' ? route.combined_hazard_risk : route.landslide_risk;
+
+  if (typeof route.distance_km === 'number' && route.distance_km === minDist) tags.push({ label: 'Shortest', type: 'distance' });
+  if (typeof route.estimated_time_min === 'number' && route.estimated_time_min === minTime) tags.push({ label: 'Fastest', type: 'time' });
+  if (typeof currentRisk === 'number' && currentRisk === minRisk) tags.push({ label: 'Safest', type: 'risk' });
+  if (typeof route.accessibility_score === 'number' && route.accessibility_score === maxScore) tags.push({ label: 'Top Score', type: 'score' });
 
   return tags;
 };
@@ -42,9 +52,11 @@ export default function App() {
   const [selectedRoute, setSelectedRoute] = useState(null);
   const [recommendedId, setRecommendedId] = useState(null);
   const [backendRecId, setBackendRecId] = useState(null);
+  const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [backendConnected, setBackendConnected] = useState(false);
   const [queryUrgency, setQueryUrgency] = useState('MEDIUM');
+  const [queryVehicle, setQueryVehicle] = useState('CAR');
 
   // Vehicle simulation hook
   const sim = useVehicleSimulation(selectedRoute);
@@ -62,31 +74,37 @@ export default function App() {
     let isMounted = true;
     const checkBackend = async () => {
       try {
-        const res = await fetch('/health');
-        if (res.ok && isMounted) setBackendConnected(true);
-      } catch {
-        try {
-          const fallbackRes = await fetch('http://localhost:8000/');
-          if (fallbackRes.ok && isMounted) setBackendConnected(true);
-        } catch {
-          if (isMounted) setBackendConnected(false);
+        const res = await fetch(`${API_BASE_URL}/health`);
+        if (res.ok && isMounted) {
+          setBackendConnected(true);
+          return;
         }
-      }
+      } catch {}
+      try {
+        const fallbackRes = await fetch('http://127.0.0.1:8000/health');
+        if (fallbackRes.ok && isMounted) {
+          setBackendConnected(true);
+          return;
+        }
+      } catch {}
+      if (isMounted) setBackendConnected(false);
     };
     checkBackend();
-    const timer = setInterval(checkBackend, 12000);
+    const timer = setInterval(checkBackend, 10000);
     return () => { isMounted = false; clearInterval(timer); };
   }, []);
 
   // Search handler: fetches routes from /recommend-route
-  const handleSearch = async ({ origin, destination, urgency }) => {
+  const handleSearch = async ({ origin, destination, urgency, vehicle_type, vehicleType }) => {
     setViewState('loading');
     setSelectedRoute(null);
     setRecommendedId(null);
     setBackendRecId(null);
     setErrorMessage('');
     const normalizedUrgency = (urgency || 'MEDIUM').toUpperCase();
+    const normalizedVehicle = (vehicle_type || vehicleType || 'CAR').toUpperCase();
     setQueryUrgency(normalizedUrgency);
+    setQueryVehicle(normalizedVehicle);
 
     // Reset any running simulation
     sim.controls.reset();
@@ -102,15 +120,25 @@ export default function App() {
     const payload = {
       origin: origin.trim(),
       destination: destination.trim(),
-      urgency: normalizedUrgency
+      urgency: normalizedUrgency,
+      vehicle_type: normalizedVehicle
     };
 
     try {
-      const response = await fetch('/recommend-route', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      let response;
+      try {
+        response = await fetch(`${API_BASE_URL}/recommend-route`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (proxyErr) {
+        response = await fetch('http://127.0.0.1:8000/recommend-route', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -139,9 +167,9 @@ export default function App() {
       setRoutes(returnedRoutes);
       const recId = data.recommended_route_id || returnedRoutes[0]?.route_id || null;
       setBackendRecId(recId);
-      setRecommendedId(recId);
-      const bestRoute = returnedRoutes.find(r => r.route_id === recId) || returnedRoutes[0];
-      setSelectedRoute(bestRoute || null);
+      setRecommendedId(null);
+      setHasAnalyzed(false);
+      setSelectedRoute(returnedRoutes[0] || null);
       setViewState('results');
       // Remain on the Route Results view (Map & Corridor Cards)
       setActiveNav('map');
@@ -156,16 +184,18 @@ export default function App() {
   const handleRecommend = () => {
     if (!routes.length) return;
 
-    let winner = routes.find(r => r.route_id === (recommendedId || backendRecId));
+    let winner = routes.find(r => r.route_id === backendRecId);
     if (!winner) {
       winner = routes.reduce((best, r) =>
         (r.accessibility_score > (best?.accessibility_score ?? -Infinity)) ? r : best
       , null);
     }
+    const finalRecId = winner ? winner.route_id : backendRecId;
+    setRecommendedId(finalRecId);
     if (winner) {
-      setRecommendedId(winner.route_id);
       setSelectedRoute(winner);
     }
+    setHasAnalyzed(true);
     // Navigate to Decision Intelligence / Analysis view and scroll to top
     setActiveNav('decision');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -204,13 +234,23 @@ export default function App() {
         destination: activeRouteDest,
         blocked_location: { lat: lPos[0], lon: lPos[1] },
         urgency: queryUrgency,
+        vehicle_type: queryVehicle,
       };
 
-      const res = await fetch('/reroute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      let res;
+      try {
+        res = await fetch(`${API_BASE_URL}/reroute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch (proxyErr) {
+        res = await fetch('http://127.0.0.1:8000/reroute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -292,7 +332,7 @@ export default function App() {
                 <RouteMap
                   routes={viewState === 'results' ? routes : []}
                   selectedRoute={selectedRoute}
-                  recommendedId={recommendedId || backendRecId}
+                  recommendedId={hasAnalyzed ? (recommendedId || backendRecId) : null}
                   onRouteClick={(r) => setSelectedRoute(r)}
                   vehiclePos={sim.vehiclePos}
                   landslidePos={sim.landslidePos}
@@ -366,15 +406,15 @@ export default function App() {
                             route={route}
                             index={idx}
                             isSelected={selectedRoute && selectedRoute.route_id === route.route_id}
-                            isRecommended={(recommendedId || backendRecId) === route.route_id}
-                            comparisonTags={getComparisonTags(route, routes)}
+                            isRecommended={hasAnalyzed && (recommendedId || backendRecId) === route.route_id}
+                            comparisonTags={hasAnalyzed ? getComparisonTags(route, routes) : []}
                             onSelect={(r) => setSelectedRoute(r)}
                           />
                         ))}
                       </div>
 
-                      {/* Emergency Rerouting Results (if active) */}
-                      {emergencyRoutes.length > 0 && (
+                      {/* Emergency Rerouting Results (only during active landslide incident simulation) */}
+                      {sim.simState === 'landslide' && emergencyRoutes.length > 0 && (
                         <EmergencyRoutePanel
                           emergencyRoutes={emergencyRoutes}
                           emergencyRecommendedId={emergencyRecommendedId}
@@ -390,17 +430,10 @@ export default function App() {
                         <button
                           type="button"
                           className="analyse-corridors-btn"
-                          onClick={() => {
-                            setActiveNav('decision');
-                            window.scrollTo({ top: 0, behavior: 'smooth' });
-                          }}
+                          onClick={handleRecommend}
                           id="system-recommend-btn"
                         >
-                          <span>
-                            {selectedRoute?.route_id === (recommendedId || backendRecId)
-                              ? 'Analyze Recommended Route →'
-                              : `Analyze Selected Route [${selectedRoute?.route_id || 'R1'}] →`}
-                          </span>
+                          <span>Analyze Recommended Route →</span>
                         </button>
                       </div>
                     </>
@@ -420,6 +453,7 @@ export default function App() {
                       recommendedRoute={activeWinner}
                       allRoutes={routes}
                       urgency={queryUrgency}
+                      vehicleType={queryVehicle}
                     />
                   </div>
                   <div className="decision-col-right">
@@ -428,6 +462,7 @@ export default function App() {
                       allRoutes={routes}
                       urgency={queryUrgency}
                       selectedRoute={selectedRoute}
+                      vehicleType={queryVehicle}
                     />
                   </div>
                 </div>
@@ -453,6 +488,7 @@ export default function App() {
                 selectedRoute={selectedRoute}
                 allRoutes={routes}
                 onSelectRoute={(r) => setSelectedRoute(r)}
+                vehicleType={queryVehicle}
               />
             </div>
           )}
@@ -466,6 +502,7 @@ export default function App() {
                 selectedRoute={selectedRoute}
                 onSelectRoute={(r) => setSelectedRoute(r)}
                 onViewDetails={(r) => { setSelectedRoute(r); setActiveNav('map'); }}
+                vehicleType={queryVehicle}
               />
             </div>
           )}
