@@ -189,19 +189,16 @@ export default function DemoControlButton({
       <button
         type="button"
         className={`floating-demo-fab ${isActive ? 'active' : ''}`}
-        onClick={isActive ? null : start}
-        disabled={isActive}
+        onClick={() => {
+          window.open('/live-demo', '_blank');
+        }}
         id="demo-simulation-fab"
-        title={isActive ? 'Simulation in progress' : 'Start Journey Simulation'}
+        title="Open MARG LIVE Disruption Simulation in new tab"
       >
         <span className="fab-icon-svg">
-          {isActive ? (
-            <IconActivity size={22} color="#FFFFFF" strokeWidth={2.4} />
-          ) : (
-            <IconTruck size={22} />
-          )}
+          <IconTruck size={22} />
         </span>
-        <span className="fab-label">{isActive ? 'Simulation Active' : 'Start Journey Simulation'}</span>
+        <span className="fab-label">Start Journey Simulation</span>
       </button>
     </>
   );
