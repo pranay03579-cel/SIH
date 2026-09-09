@@ -330,18 +330,21 @@ def _require_both_or_neither(raw_query_params, origin: Optional[str], destinatio
 # ============================================================
 
 @app.get("/", tags=["Health"])
+@app.get("/api", tags=["Health"])
 def root_check():
     """Check if the MARG backend is running."""
     return {"status": "MARG Backend Running"}
 
 
 @app.get("/health", tags=["Health"])
+@app.get("/api/health", tags=["Health"])
 def health_check():
     """Health check endpoint for frontend and monitoring."""
     return {"status": "ok"}
 
 
 @app.get("/routes", tags=["Routes"])
+@app.get("/api/routes", tags=["Routes"])
 def get_all_routes(
     request:     Request,
     origin:      Optional[str] = Query(default=None, description="Filter by origin city (case-insensitive)"),
@@ -384,6 +387,7 @@ def get_all_routes(
 
 
 @app.get("/routes/{route_id}", tags=["Routes"])
+@app.get("/api/routes/{route_id}", tags=["Routes"])
 def get_route_by_id(route_id: str):
     """
     Return complete information for a single route.
@@ -409,6 +413,7 @@ def get_route_by_id(route_id: str):
 
 
 @app.post("/recommend-route", tags=["Recommendation"])
+@app.post("/api/recommend-route", tags=["Recommendation"])
 def recommend_route(request: RecommendRequest):
     """
     AI Route Recommendation Engine — orchestrates the full pipeline.
@@ -540,6 +545,7 @@ def recommend_route(request: RecommendRequest):
 # ============================================================
 
 @app.post("/reroute", tags=["Emergency Rerouting"])
+@app.post("/api/reroute", tags=["Emergency Rerouting"])
 def emergency_reroute(request: RerouteRequest):
     """
     Emergency Dynamic Rerouting — Phase 5.
@@ -750,8 +756,10 @@ import urllib.request as _urllib_request
 import urllib.parse as _urllib_parse
 import json as _json
 
-@app.get("/locations/search")
-@app.get("/location-suggestions")
+@app.get("/locations/search", tags=["Locations"])
+@app.get("/api/locations/search", tags=["Locations"])
+@app.get("/location-suggestions", tags=["Locations"])
+@app.get("/api/location-suggestions", tags=["Locations"])
 def search_locations(q: str = Query(..., min_length=1, description="Location search query")):
     """
     Open geocoding autocomplete proxy.
