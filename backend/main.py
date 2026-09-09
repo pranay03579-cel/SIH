@@ -331,6 +331,9 @@ def _require_both_or_neither(raw_query_params, origin: Optional[str], destinatio
 
 @app.get("/", tags=["Health"])
 @app.get("/api", tags=["Health"])
+@app.get("/index.py", tags=["Health"])
+@app.get("/api/index.py", tags=["Health"])
+@app.get("/api/index", tags=["Health"])
 def root_check():
     """Check if the MARG backend is running."""
     return {"status": "MARG Backend Running"}
@@ -338,6 +341,7 @@ def root_check():
 
 @app.get("/health", tags=["Health"])
 @app.get("/api/health", tags=["Health"])
+@app.get("/healthz", tags=["Health"])
 def health_check():
     """Health check endpoint for frontend and monitoring."""
     return {"status": "ok"}

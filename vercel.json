@@ -1,43 +1,37 @@
 {
   "version": 2,
-  "buildCommand": "npm --prefix frontend install && npm --prefix frontend run build",
-  "outputDirectory": "frontend/dist",
-  "rewrites": [
+  "builds": [
     {
-      "source": "/recommend-route",
-      "destination": "/api/index.py"
+      "src": "api/index.py",
+      "use": "@vercel/python"
     },
     {
-      "source": "/reroute",
-      "destination": "/api/index.py"
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(recommend-route|reroute|routes.*|locations.*|location-suggestions|health.*|api.*)",
+      "dest": "api/index.py"
     },
     {
-      "source": "/routes/:match*",
-      "destination": "/api/index.py"
+      "src": "/assets/(.*)",
+      "dest": "/frontend/assets/$1"
     },
     {
-      "source": "/routes",
-      "destination": "/api/index.py"
+      "src": "/(.*\\.(?:js|css|ico|png|jpg|jpeg|svg|json|woff2?|ttf|eot|webp))",
+      "dest": "/frontend/$1"
     },
     {
-      "source": "/locations/:match*",
-      "destination": "/api/index.py"
+      "handle": "filesystem"
     },
     {
-      "source": "/location-suggestions",
-      "destination": "/api/index.py"
-    },
-    {
-      "source": "/health",
-      "destination": "/api/index.py"
-    },
-    {
-      "source": "/api/:match*",
-      "destination": "/api/index.py"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "src": "/(.*)",
+      "dest": "/frontend/index.html"
     }
   ]
 }
