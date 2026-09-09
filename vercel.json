@@ -1,0 +1,43 @@
+{
+  "version": 2,
+  "buildCommand": "npm --prefix frontend install && npm --prefix frontend run build",
+  "outputDirectory": "frontend/dist",
+  "rewrites": [
+    {
+      "source": "/recommend-route",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/reroute",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/routes/:match*",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/routes",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/locations/:match*",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/location-suggestions",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/api/:match*",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
